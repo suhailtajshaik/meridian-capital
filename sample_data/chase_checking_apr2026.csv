@@ -1,0 +1,143 @@
+date,description,amount,category,balance
+2026-04-01,Blue Bottle,-6.78,Dining out,5193.22
+2026-04-01,Souvla,-23.88,Dining out,5169.34
+2026-04-01,Blue Bottle,-5.19,Dining out,5164.15
+2026-04-01,Lyft,-12.24,Transport,5151.91
+2026-04-02,Trader Joe's,-61.25,Groceries,5090.66
+2026-04-02,Souvla,-25.73,Dining out,5064.93
+2026-04-02,Berkeley Bowl,-49.73,Groceries,5015.20
+2026-04-02,Lyft,-9.13,Transport,5006.07
+2026-04-02,Burma Superstar,-36.52,Dining out,4969.55
+2026-04-03,Netflix,-22.99,Subscriptions,4946.56
+2026-04-03,Philz Coffee,-6.59,Dining out,4939.97
+2026-04-03,Lyft,-14.20,Transport,4925.77
+2026-04-03,Ritual,-6.95,Dining out,4918.82
+2026-04-03,Lyft,-21.58,Transport,4897.24
+2026-04-03,Lyft,-9.10,Transport,4888.14
+2026-04-04,Mortgage - Wells Fargo,-2410.00,Housing,2478.14
+2026-04-04,Sweetgreen,-17.42,Dining out,2460.72
+2026-04-04,Mensho Tokyo,-28.78,Dining out,2431.94
+2026-04-05,Safeway,-37.98,Groceries,2393.96
+2026-04-05,Amazon,-78.40,Shopping,2315.56
+2026-04-05,Marufuku Ramen,-34.74,Dining out,2280.82
+2026-04-05,Philz Coffee,-6.12,Dining out,2274.70
+2026-04-05,Target,-86.77,Groceries,2187.93
+2026-04-06,Sightglass,-5.33,Dining out,2182.60
+2026-04-06,Nopa,-118.31,Dining out,2064.29
+2026-04-06,Tacolicious,-33.77,Dining out,2030.52
+2026-04-07,Direct Deposit - Acme Corp,4725.00,Income,6755.52
+2026-04-07,Sweetgreen,-15.52,Dining out,6740.00
+2026-04-07,Lyft,-17.07,Transport,6722.93
+2026-04-07,Lyft,-20.08,Transport,6702.85
+2026-04-07,Bartaco,-51.88,Dining out,6650.97
+2026-04-08,Transfer to Emergency Fund,-400.00,Transfer,6250.97
+2026-04-08,Transfer to Kitchen Reno,-600.00,Transfer,5650.97
+2026-04-08,Transfer to Vacation Fund,-350.00,Transfer,5300.97
+2026-04-08,Roth IRA Contribution - Vanguard,-583.00,Transfer,4717.97
+2026-04-08,Philz Coffee,-7.37,Dining out,4710.60
+2026-04-08,Shell,-52.40,Transport,4658.20
+2026-04-08,Lyft,-10.21,Transport,4647.99
+2026-04-08,Ritual,-5.14,Dining out,4642.85
+2026-04-08,Berkeley Bowl,-45.47,Groceries,4597.38
+2026-04-09,Apple iCloud,-9.99,Subscriptions,4587.39
+2026-04-09,Equinox - Monthly,-185.00,Health,4402.39
+2026-04-09,Whole Foods,-80.51,Groceries,4321.88
+2026-04-09,Sweetgreen,-15.77,Dining out,4306.11
+2026-04-10,Sightglass,-4.81,Dining out,4301.30
+2026-04-10,ATM Withdrawal - Chase,-100.00,Cash,4201.30
+2026-04-10,Target,-90.11,Groceries,4111.19
+2026-04-10,Philz Coffee,-7.13,Dining out,4104.06
+2026-04-11,Tacolicious,-45.16,Dining out,4058.90
+2026-04-11,Lyft,-22.80,Transport,4036.10
+2026-04-12,PG&E Electric,-118.40,Housing,3917.70
+2026-04-12,Comcast Xfinity,-89.99,Housing,3827.71
+2026-04-12,Target,-36.87,Groceries,3790.84
+2026-04-12,REI Co-op,-142.30,Shopping,3648.54
+2026-04-13,Ritual,-4.79,Dining out,3643.75
+2026-04-13,Trader Joe's,-71.45,Groceries,3572.30
+2026-04-13,Peet's,-5.93,Dining out,3566.37
+2026-04-14,NYTimes Digital,-17.00,Subscriptions,3549.37
+2026-04-14,Strava Premium,-11.99,Subscriptions,3537.38
+2026-04-14,Mensho Tokyo,-24.60,Dining out,3512.78
+2026-04-14,Lyft,-21.31,Transport,3491.47
+2026-04-15,City Water & Sewer,-64.20,Housing,3427.27
+2026-04-15,Honda Financial - Auto Pmt,-312.00,Transport,3115.27
+2026-04-15,SoFi Student Loan Pmt,-218.00,Housing,2897.27
+2026-04-15,Berkeley Bowl,-36.75,Groceries,2860.52
+2026-04-15,BART - Clipper Reload,-40.00,Transport,2820.52
+2026-04-15,Ritual,-6.09,Dining out,2814.43
+2026-04-15,Trader Joe's,-72.43,Groceries,2742.00
+2026-04-15,Lyft,-10.63,Transport,2731.37
+2026-04-16,Sightglass,-6.31,Dining out,2725.06
+2026-04-16,Uniqlo,-89.50,Shopping,2635.56
+2026-04-17,Mensho Tokyo,-25.35,Dining out,2610.21
+2026-04-17,Venmo - Roommate (Sam),-240.00,Transfer,2370.21
+2026-04-17,Lyft,-14.39,Transport,2355.82
+2026-04-18,Chase Sapphire - Payment,-145.00,Transfer,2210.82
+2026-04-18,Capital One - Payment,-200.00,Transfer,2010.82
+2026-04-18,Trader Joe's,-70.93,Groceries,1939.89
+2026-04-18,Philz Coffee,-4.69,Dining out,1935.20
+2026-04-18,Lyft,-8.87,Transport,1926.33
+2026-04-19,Nopa,-102.11,Dining out,1824.22
+2026-04-19,Uber,-18.30,Transport,1805.92
+2026-04-20,Blue Bottle,-6.69,Dining out,1799.23
+2026-04-20,Amazon,-34.20,Shopping,1765.03
+2026-04-20,Blue Bottle,-7.08,Dining out,1757.95
+2026-04-20,Lyft,-10.64,Transport,1747.31
+2026-04-21,Peloton Membership,-44.00,Subscriptions,1703.31
+2026-04-21,Target,-89.41,Groceries,1613.90
+2026-04-21,Lyft,-14.77,Transport,1599.13
+2026-04-22,Direct Deposit - Acme Corp,4725.00,Income,6324.13
+2026-04-22,Peet's,-4.87,Dining out,6319.26
+2026-04-22,Chevron,-48.90,Transport,6270.36
+2026-04-23,CVS Pharmacy,-34.50,Health,6235.86
+2026-04-23,Sweetgreen,-16.44,Dining out,6219.42
+2026-04-23,Lyft,-8.18,Transport,6211.24
+2026-04-24,Target,-48.28,Groceries,6162.96
+2026-04-24,Ritual,-4.74,Dining out,6158.22
+2026-04-24,ATM Withdrawal - Chase,-60.00,Cash,6098.22
+2026-04-25,Ikea,-178.40,Shopping,5919.82
+2026-04-26,Bartaco,-56.37,Dining out,5863.45
+2026-04-26,Lyft,-16.40,Transport,5847.05
+2026-04-27,Target,-70.79,Groceries,5776.26
+2026-04-27,Sightglass,-6.99,Dining out,5769.27
+2026-04-27,Blue Bottle,-4.84,Dining out,5764.43
+2026-04-28,Audible,-14.95,Subscriptions,5749.48
+2026-04-28,Etsy - Hand & Cradle,-58.00,Shopping,5691.48
+2026-04-28,Nopa,-68.38,Dining out,5623.10
+2026-04-28,Lyft,-9.57,Transport,5613.53
+2026-04-28,Lyft,-21.38,Transport,5592.15
+2026-04-29,Peet's,-7.16,Dining out,5584.99
+2026-04-29,Shell,-54.20,Transport,5530.79
+2026-04-29,Tacolicious,-52.29,Dining out,5478.50
+2026-04-30,Berkeley Bowl,-67.41,Groceries,5411.09
+2026-04-30,Souvla,-19.63,Dining out,5391.46
+2026-04-30,Ritual,-5.69,Dining out,5385.77
+2026-04-30,Sightglass,-5.70,Dining out,5380.07
+2026-04-30,Souvla,-20.97,Dining out,5359.10
+2026-05-01,SoFi Student Loan Pmt,-218.00,Housing,5141.10
+2026-05-01,Sightglass,-6.23,Dining out,5134.87
+2026-05-01,Nopa,-104.82,Dining out,5030.05
+2026-05-01,Peet's,-6.75,Dining out,5023.30
+2026-05-01,Lyft,-16.89,Transport,5006.41
+2026-05-02,Chase Sapphire - Payment,-145.00,Transfer,4861.41
+2026-05-02,Marufuku Ramen,-28.86,Dining out,4832.55
+2026-05-02,BART - Clipper Reload,-40.00,Transport,4792.55
+2026-05-03,Netflix,-22.99,Subscriptions,4769.56
+2026-05-03,Amazon,-42.10,Shopping,4727.46
+2026-05-03,Sweetgreen,-15.17,Dining out,4712.29
+2026-05-03,Blue Bottle,-7.11,Dining out,4705.18
+2026-05-03,Lyft,-22.70,Transport,4682.48
+2026-05-03,Bartaco,-40.14,Dining out,4642.34
+2026-05-04,Mortgage - Wells Fargo,-2410.00,Housing,2232.34
+2026-05-04,Lyft,-19.80,Transport,2212.54
+2026-05-05,Blue Bottle,-4.64,Dining out,2207.90
+2026-05-05,Safeway,-47.42,Groceries,2160.48
+2026-05-06,Whole Foods,-52.10,Groceries,2108.38
+2026-05-06,Burma Superstar,-40.49,Dining out,2067.89
+2026-05-07,Direct Deposit - Acme Corp,4725.00,Income,6792.89
+2026-05-07,Equinox - Monthly,-185.00,Health,6607.89
+2026-05-08,Trader Joe's,-84.20,Groceries,6523.69
+2026-05-08,Lyft,-12.40,Transport,6511.29
+2026-05-08,Lyft,-9.57,Transport,6501.72
+2026-05-08,Tartine Bakery,-23.53,Dining out,6478.19

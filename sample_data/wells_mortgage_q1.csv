@@ -1,0 +1,4 @@
+date,description,amount,category,balance
+2026-04-01,Opening balance,0.00,Statement,313276.77
+2026-04-04,Payment received,-2410.00,Payment,interest: 1533.23 | principal: 876.77
+2026-04-30,Closing balance,0.00,Statement,312400.00

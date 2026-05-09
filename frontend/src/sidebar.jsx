@@ -3,10 +3,10 @@ import { I } from './icons.jsx';
 
 /* Sidebar navigation */
 
-export function Sidebar({ active, onNav, persona }) {
+export function Sidebar({ active, onNav }) {
   const items = [
     { id: "dashboard", label: "Dashboard", icon: I.dashboard },
-    { id: "documents", label: "Documents", icon: I.doc, badge: "6" },
+    { id: "documents", label: "Documents", icon: I.doc },
     { id: "chat", label: "Advisor chat", icon: I.chat },
   ];
   const advisors = [
@@ -49,9 +49,9 @@ export function Sidebar({ active, onNav, persona }) {
       {system.map(renderItem)}
 
       <div className="user-card">
-        <div className="avatar">{persona.initials}</div>
+        <div className="avatar">–</div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div className="user-name">{persona.name}</div>
+          <div className="user-name">Your account</div>
           <div className="user-meta">
             <I.lock size={10}/> Local vault · on-device
           </div>
@@ -60,4 +60,3 @@ export function Sidebar({ active, onNav, persona }) {
     </aside>
   );
 }
-

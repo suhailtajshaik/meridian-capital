@@ -57,3 +57,14 @@ logs/
 
 # Claude
 .claude/
+
+# Backend runtime data
+backend/data/
+backend/data/*.db
+backend/venv/
+backend/.env
+__pycache__/
+*.pyc
+
+# Docker
+.docker/

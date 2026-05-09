@@ -1,0 +1,42 @@
+date,description,amount,category,balance_owed
+2026-04-01,Spotify,-16.99,Subscriptions,16.99
+2026-04-02,Chevron,-52.40,Transport,69.39
+2026-04-03,Trader Joe's,-68.20,Groceries,137.59
+2026-04-04,Bartaco,-54.30,Dining out,191.89
+2026-04-05,Amazon,-34.50,Shopping,226.39
+2026-04-06,Sweetgreen,-16.40,Dining out,242.79
+2026-04-07,Shell,-48.20,Transport,290.99
+2026-04-08,Whole Foods,-82.60,Groceries,373.59
+2026-04-09,Tartine Bakery,-8.40,Dining out,381.99
+2026-04-10,Uniqlo,-68.20,Shopping,450.19
+2026-04-11,Mensho Tokyo,-38.40,Dining out,488.59
+2026-04-12,Lyft,-18.30,Transport,506.89
+2026-04-13,Blue Bottle,-6.80,Dining out,513.69
+2026-04-14,Target,-112.40,Shopping,626.09
+2026-04-15,Souvla,-28.40,Dining out,654.49
+2026-04-16,Shell,-50.10,Transport,704.59
+2026-04-17,Sightglass,-7.20,Dining out,711.79
+2026-04-18,Payment - Thank You,200.00,Payment,511.79
+2026-04-19,Amazon,-42.80,Shopping,554.59
+2026-04-20,Bartaco,-64.50,Dining out,619.09
+2026-04-21,Trader Joe's,-58.40,Groceries,677.49
+2026-04-22,Etsy,-38.00,Shopping,715.49
+2026-04-23,Lyft,-22.80,Transport,738.29
+2026-04-24,Tacolicious,-42.30,Dining out,780.59
+2026-04-25,Whole Foods,-64.10,Groceries,844.69
+2026-04-26,Ritual Coffee,-7.40,Dining out,852.09
+2026-04-27,Shell,-49.80,Transport,901.89
+2026-04-28,Nopa,-98.20,Dining out,1000.09
+2026-04-29,Amazon,-28.40,Shopping,1028.49
+2026-04-30,Burma Superstar,-52.60,Dining out,1081.09
+2026-05-01,Spotify,-16.99,Subscriptions,1098.08
+2026-05-02,Chevron,-54.20,Transport,1152.28
+2026-05-03,Trader Joe's,-71.40,Groceries,1223.68
+2026-05-04,Sweetgreen,-17.80,Dining out,1241.48
+2026-05-05,Shell,-48.00,Transport,1289.48
+2026-05-06,Spotify,-16.99,Subscriptions,1306.47
+2026-05-06,Marufuku Ramen,-32.40,Dining out,1338.87
+2026-05-07,Amazon,-38.20,Shopping,1377.07
+2026-05-07,Whole Foods,-56.30,Groceries,1433.37
+2026-05-08,Lyft,-14.80,Transport,1448.17
+2026-05-08,Statement Closing - Balance Due,-1980.00,Statement,1980.00

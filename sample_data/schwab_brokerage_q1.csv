@@ -1,0 +1,19 @@
+date,type,symbol,description,quantity,price,amount_or_value
+2026-04-30,HOLDING,VTI,Vanguard Total Stock Market ETF,62.4500,245.20,15312.74
+2026-04-30,HOLDING,VXUS,Vanguard Total Intl Stock ETF,84.1200,62.40,5249.09
+2026-04-30,HOLDING,BND,Vanguard Total Bond Market ETF,48.0000,73.10,3508.80
+2026-04-30,HOLDING,VTSAX,Vanguard Total Stock Market Idx,23.4100,128.40,3005.78
+2026-04-30,HOLDING,AAPL,Apple Inc,12.0000,194.20,2330.40
+2026-04-30,HOLDING,MSFT,Microsoft Corp,5.0000,412.80,2064.00
+2026-04-30,HOLDING,GOOGL,Alphabet Inc Class A,8.0000,168.40,1347.20
+2026-04-30,HOLDING,BRK.B,Berkshire Hathaway B,3.0000,418.60,1255.80
+2026-04-30,HOLDING,VYM,Vanguard High Dividend Yield ETF,10.0000,124.30,1243.00
+2026-04-30,CASH,$,Cash & Money Market,1.0000,1842.50,1842.50
+2026-04-02,BUY,VTI,Vanguard Total Stock Market ETF,2.0000,243.10,-486.20
+2026-04-02,BUY,VXUS,Vanguard Total Intl Stock ETF,3.0000,61.80,-185.40
+2026-04-15,DIVIDEND,VTI,Quarterly distribution,0.0000,0.00,84.20
+2026-04-15,DIVIDEND,VYM,Quarterly distribution,0.0000,0.00,32.40
+2026-04-15,DIVIDEND,BND,Monthly distribution,0.0000,0.00,12.10
+2026-04-22,BUY,VTSAX,Vanguard Total Stock Market Idx,1.5000,128.10,-192.15
+2026-04-29,DIVIDEND,AAPL,Quarterly dividend,0.0000,0.00,12.00
+2026-04-30,FEE,-,Account maintenance,0.0000,0.00,-0.00

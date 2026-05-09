@@ -1,13 +1,13 @@
 # sample_data/
 
 Seed CSVs for the Meridian demo. Drag any of these into the **Documents**
-tab in the running Streamlit app to populate the vault.
+tab in the running React app to populate the vault.
 
 The numbers here **reconcile with the persona** (Maya Patel) hardcoded in
-`data.py`. Uploading these doesn't change the dashboard's headline numbers
-(those are still mocked) — but every `rag_retrieve` row reference, every
-debt APR, every monthly transaction in the agent traces points back to a
-row that actually exists in one of these files.
+`frontend/src/data.js`. Uploading these doesn't change the dashboard's
+headline numbers (those are still mocked) — but every `rag_retrieve` row
+reference, every debt APR, every monthly transaction in the agent traces
+points back to a row that actually exists in one of these files.
 
 | File | Rows | Source | Reconciles with |
 | --- | ---:| --- | --- |
@@ -28,9 +28,7 @@ at the top — so re-running produces identical files.
 
 If you add a new file here, also update:
 
-1. `PERSONA["documents"]` in `data.py` so the Documents view's pre-seeded
-   sources list reflects it.
-2. The mapping in `views/documents.py::_source_from_name` if the filename
-   contains a new bank/lender keyword.
-3. `docs/DATA_MODEL.md`'s "How to add a new persona" section if you're
-   replacing the persona wholesale.
+1. `PERSONA["documents"]` in `frontend/src/data.js` so the Documents view's
+   pre-seeded sources list reflects it.
+2. The filename → source mapping in `frontend/src/documents.jsx` if the
+   filename contains a new bank/lender keyword.

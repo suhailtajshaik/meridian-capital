@@ -126,6 +126,13 @@ export default function App() {
     setShowWelcome(false);
   };
 
+  const handleClearAll = async () => {
+    await financialData.clearAll();
+    localStorage.removeItem("meridian.user_name");
+    setUserName("");
+    setShowWelcome(true);
+  };
+
   React.useEffect(() => {
     document.documentElement.setAttribute("data-theme", t.theme);
     document.documentElement.setAttribute("data-density", t.density);
@@ -164,7 +171,7 @@ export default function App() {
     const props = {
       snapshot: financialData.snapshot,
       loading: financialData.loading,
-      clearAll: financialData.clearAll,
+      clearAll: handleClearAll,
       uploadFile: financialData.uploadFile,
       uploading: financialData.uploading,
       uploadError: financialData.uploadError,

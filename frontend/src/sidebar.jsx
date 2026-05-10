@@ -36,9 +36,9 @@ export function Sidebar({ active, onNav, userName }) {
   return (
     <aside className="sidebar">
       <div className="brand">
-        <div className="brand-mark">m</div>
+        <div className="brand-mark">mc</div>
         <div>
-          <div className="brand-name">Meridian</div>
+          <div className="brand-name">Meridian Capital</div>
           <div className="brand-sub">Your Money, Made Simple</div>
         </div>
       </div>

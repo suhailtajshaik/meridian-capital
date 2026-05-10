@@ -6,7 +6,8 @@ import { getSessionId } from './lib/session.js';
 /* Documents / ingestion view */
 
 export function StatusPill({ status }) {
-  if (status === "ready") return <span className="tag pos"><I.check size={10}/> Indexed</span>;
+  if (status === "uploaded") return <span className="tag"><I.check size={10}/> Uploaded</span>;
+  if (status === "ready") return <span className="tag pos"><I.check size={10}/> Analyzed</span>;
   if (status === "embedding") return <span className="tag info"><span className="spinner" style={{ borderColor: "currentColor", borderTopColor: "transparent", width: 9, height: 9 }}/> Embedding</span>;
   if (status === "parsing") return <span className="tag warn">Parsing</span>;
   if (status === "normalizing") return <span className="tag warn">Normalizing</span>;
@@ -85,7 +86,11 @@ export function Documents({ online, onNav, uploadFile: apiUpload, uploading, upl
         const inFlight = prev.filter((d) => !d.sha256 && d._key);
         const serverWithKeys = serverDocs.map((d) => {
           const optimistic = prev.find((p) => p.sha256 === d.sha256);
-          return optimistic && optimistic._key ? { ...d, _key: optimistic._key } : d;
+          if (!optimistic) return d;
+          const merged = { ...d };
+          if (optimistic._key) merged._key = optimistic._key;
+          if (optimistic.status === 'uploaded') merged.status = 'uploaded';
+          return merged;
         });
         return [...inFlight, ...serverWithKeys];
       });
@@ -96,14 +101,26 @@ export function Documents({ online, onNav, uploadFile: apiUpload, uploading, upl
 
   React.useEffect(() => { loadDocs(); }, [loadDocs]);
 
+  // When snapshot finishes computing (views refreshed), promote 'uploaded' docs to 'indexed'.
+  React.useEffect(() => {
+    if (snapshotStatus !== 'computing' && snapshotStatus !== null) {
+      setDocs(prev => {
+        if (!prev.some(d => d.status === 'uploaded')) return prev;
+        return prev.map(d => d.status === 'uploaded' ? { ...d, status: 'ready' } : d);
+      });
+    }
+  }, [snapshotStatus]);
+
   // Derive the "most recent active step" across all in-flight uploads for the Pipeline panel.
+  // Falls back to the "analyze" step while the background snapshot is computing so the
+  // pipeline never goes idle during the ~30-second AI analysis window.
   const globalActiveStep = React.useMemo(() => {
     const steps = Object.values(stepByDoc);
-    if (!steps.length) return -1;
     const inFlight = steps.filter(s => s >= 0 && s < PIPELINE_STEPS.length);
-    if (!inFlight.length) return -1;
-    return Math.max(...inFlight);
-  }, [stepByDoc]);
+    if (inFlight.length) return Math.max(...inFlight);
+    if (snapshotStatus === 'computing') return PIPELINE_STEPS.length - 1;
+    return -1;
+  }, [stepByDoc, snapshotStatus]);
 
   const globalActiveAgent = React.useMemo(() => {
     const agents = Object.values(agentByDoc).filter(Boolean);
@@ -176,9 +193,9 @@ export function Documents({ online, onNav, uploadFile: apiUpload, uploading, upl
                 table_name: doc.table_name ?? event.table_name ?? d.table_name,
                 sha256: doc.sha256 ?? d.sha256,
                 size: doc.size != null ? formatSize(doc.size) : d.size,
-                status: 'ready',
+                status: 'uploaded',
               } : d));
-              updateStep(PIPELINE_STEPS.length);
+              updateStep(STAGE_INDEX["analyze"]);
               updateAgent(null);
               loadDocs().catch(() => {});
               startPolling?.();
@@ -193,7 +210,6 @@ export function Documents({ online, onNav, uploadFile: apiUpload, uploading, upl
             }
           },
         });
-        updateStatus('ready');
       } catch {
         updateStep(-1);
         updateStatus('error');
@@ -328,8 +344,10 @@ export function Documents({ online, onNav, uploadFile: apiUpload, uploading, upl
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 13, fontWeight: 500 }}>{p.step}</div>
                   <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
-                    {p.key === "analyze" && p.status === "running" && globalActiveAgent
-                      ? <>Running <strong style={{ color: "var(--info)" }}>{globalActiveAgent.replace(/_/g, ' ')}</strong> …</>
+                    {p.key === "analyze" && p.status === "running"
+                      ? globalActiveAgent
+                        ? <>Running <strong style={{ color: "var(--info)" }}>{globalActiveAgent.replace(/_/g, ' ')}</strong> …</>
+                        : <>Advisors analyzing your finances<span style={{ color: "var(--ink-4)" }}> (~30s)</span></>
                       : p.desc}
                   </div>
                 </div>

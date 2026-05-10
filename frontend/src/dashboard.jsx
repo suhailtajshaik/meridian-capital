@@ -314,6 +314,7 @@ export function Dashboard({ snapshot, snapshotStatus, loading, openChat, onNav }
     );
   }
 
+  const isComputing = snapshotStatus === "computing";
   const hasData = !!(snapshot && stats);
   const { debts = [], savings = [], budget = [], cashFlow = 0, totalDebt = 0, totalSavings = 0, riskLevel = null } = stats ?? {};
 
@@ -355,10 +356,10 @@ export function Dashboard({ snapshot, snapshotStatus, loading, openChat, onNav }
 
       {/* Hero stats */}
       <div className="grid-4">
-        <StatCard label="Total debt" value={totalDebt} icon={I.debt}/>
-        <StatCard label="Total savings" value={totalSavings} icon={I.savings}/>
-        <StatCard label="Cash flow" value={Math.abs(cashFlow)} icon={I.spark}/>
-        <StatCard label="Monthly spending" value={totalSpent} icon={I.budget}/>
+        <StatCard label="Total debt" value={totalDebt} icon={I.debt} skeleton={isComputing && totalDebt === 0}/>
+        <StatCard label="Total savings" value={totalSavings} icon={I.savings} skeleton={isComputing && totalSavings === 0}/>
+        <StatCard label="Cash flow" value={Math.abs(cashFlow)} icon={I.spark} skeleton={isComputing && cashFlow === 0}/>
+        <StatCard label="Monthly spending" value={totalSpent} icon={I.budget} skeleton={isComputing && totalSpent === 0}/>
       </div>
 
       {/* Budget chart when we have data */}

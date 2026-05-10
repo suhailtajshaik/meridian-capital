@@ -150,7 +150,7 @@ export default function App() {
   const advisorScope = ADVISOR_SCOPE_MAP[view] ?? null;
 
   const titleFor = {
-    dashboard: { crumb: "Home", title: "Welcome!" },
+    dashboard: { crumb: "Home", title: "Dashboard" },
     documents: { crumb: "Home", title: "My Files" },
     chat: { crumb: "Home", title: "Ask Meridian" },
     debt: { crumb: "Advisors", title: "Debt Coach" },
@@ -208,6 +208,11 @@ export default function App() {
             <strong>{titleFor.title}</strong>
           </span>
           <div className="topbar-spacer"/>
+          {userName && (
+            <span style={{ fontSize: 13, color: "var(--ink-2)", marginRight: 8, whiteSpace: "nowrap" }}>
+              Welcome, <strong style={{ color: "var(--ink)" }}>{userName}</strong>!
+            </span>
+          )}
           <span className="topbar-pill">
             <span className="dot"/> Private & Secure
           </span>

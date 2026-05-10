@@ -73,13 +73,15 @@ export function useFinancialData() {
       try {
         const result = await getSnapshotStatus(sessionId);
         if (!pollActiveRef.current) return;
-        setSnapshotStatus(result.status);
         if (result.status === 'ready') {
           stopPolling();
-          refresh().catch(() => {});
+          try { await refresh(); } catch {}
+          setSnapshotStatus('ready');
         } else if (result.status === 'computing') {
+          setSnapshotStatus('computing');
           pollTimerRef.current = setTimeout(poll, 3000);
         } else {
+          setSnapshotStatus(result.status);
           stopPolling();
         }
       } catch {

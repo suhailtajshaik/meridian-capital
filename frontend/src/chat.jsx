@@ -729,9 +729,9 @@ export function ChatPanel({ open, onClose, prominentAgents, online, model, advis
     "Where can I cut spending?",
   ];
 
-  const SCOPE_LABELS = { debt: "Debt analyzer scope", savings: "Savings scope", budget: "Budget scope", payoff: "Payoff optimizer scope" };
+  const SCOPE_LABELS = { debt: "Debt Coach mode", savings: "Savings Guide mode", budget: "Budget Helper mode", payoff: "Payoff Planner mode" };
   const subTitle = online
-    ? `Connected${model ? ` · ${model}` : ""}${advisorScope ? ` · ${SCOPE_LABELS[advisorScope]}` : " · Supervisor + 4 specialists"}`
+    ? (advisorScope ? SCOPE_LABELS[advisorScope] : "Ready to help with your finances")
     : "Backend offline";
 
   const inputDisabled = !online || isStreaming;
@@ -776,7 +776,7 @@ export function ChatPanel({ open, onClose, prominentAgents, online, model, advis
 
       <div className="chat-stream" ref={streamRef}>
         <div className="agent-chip" style={{ alignSelf: "center", color: "var(--ink-4)", fontSize: 10.5, letterSpacing: "0.06em" }}>
-          <I.lock size={10}/> PII REDACTED · EGRESS TO OPENROUTER ONLY
+          <I.lock size={10}/> ON-DEVICE · NOTHING LEAVES THIS MACHINE
         </div>
 
         {thread.length === 0 && online && (

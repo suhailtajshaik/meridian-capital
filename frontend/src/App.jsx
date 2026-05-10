@@ -11,6 +11,61 @@ import { useFinancialData } from './hooks/useFinancialData.js';
 
 /* Main app shell — routes views, manages chat panel + tweaks */
 
+/* ─── Welcome modal — shown on first visit to collect user's name ─────────── */
+function WelcomeModal({ onComplete }) {
+  const [name, setName] = React.useState("");
+  const handleSubmit = () => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    onComplete(trimmed);
+  };
+  return (
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 1000,
+      background: "rgba(0,0,0,0.35)",
+      backdropFilter: "blur(2px)",
+      display: "flex", alignItems: "center", justifyContent: "center",
+    }}>
+      <div style={{
+        background: "var(--surface)",
+        borderRadius: 14,
+        padding: "40px 40px 32px",
+        width: 380,
+        maxWidth: "calc(100vw - 40px)",
+        boxShadow: "0 8px 40px rgba(0,0,0,0.18)",
+        display: "flex", flexDirection: "column", alignItems: "center",
+        textAlign: "center",
+      }}>
+        <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 8, color: "var(--ink)" }}>Welcome!</h2>
+        <p style={{ fontSize: 15, color: "var(--ink-2)", marginBottom: 24 }}>What's your first name?</p>
+        <input
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") handleSubmit(); }}
+          placeholder="Enter your name"
+          autoFocus
+          style={{
+            width: "100%", padding: "12px 14px", fontSize: 15,
+            border: "1.5px solid var(--line)", borderRadius: 8,
+            background: "var(--surface)", color: "var(--ink)",
+            outline: "none", marginBottom: 14, boxSizing: "border-box",
+          }}
+        />
+        <button
+          className="btn primary"
+          onClick={handleSubmit}
+          disabled={!name.trim()}
+          style={{ width: "100%", padding: "12px", fontSize: 15, borderRadius: 8, marginBottom: 16 }}
+        >
+          Continue
+        </button>
+        <p style={{ fontSize: 12.5, color: "var(--ink-4)", margin: 0 }}>You can change this later in Settings.</p>
+      </div>
+    </div>
+  );
+}
+
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
   "theme": "light",
   "density": "balanced",
@@ -58,6 +113,19 @@ export default function App() {
   const { online, model } = useBackendStatus();
   const financialData = useFinancialData();
 
+  const [userName, setUserName] = React.useState(() => localStorage.getItem("meridian.user_name") || "");
+  const [showWelcome, setShowWelcome] = React.useState(() => !localStorage.getItem("meridian.user_name"));
+
+  const handleUserNameChange = (name) => {
+    localStorage.setItem("meridian.user_name", name);
+    setUserName(name);
+  };
+
+  const handleWelcomeComplete = (name) => {
+    handleUserNameChange(name);
+    setShowWelcome(false);
+  };
+
   React.useEffect(() => {
     document.documentElement.setAttribute("data-theme", t.theme);
     document.documentElement.setAttribute("data-density", t.density);
@@ -82,14 +150,14 @@ export default function App() {
   const advisorScope = ADVISOR_SCOPE_MAP[view] ?? null;
 
   const titleFor = {
-    dashboard: { crumb: "Overview", title: "Dashboard" },
-    documents: { crumb: "Ingestion", title: "Documents" },
-    chat: { crumb: "Overview", title: "Advisor chat" },
-    debt: { crumb: "Advisors", title: "Debt analyzer" },
-    savings: { crumb: "Advisors", title: "Savings strategy" },
-    budget: { crumb: "Advisors", title: "Budget advisor" },
-    payoff: { crumb: "Advisors", title: "Payoff optimizer" },
-    settings: { crumb: "System", title: "Settings & security" },
+    dashboard: { crumb: "Home", title: "Home" },
+    documents: { crumb: "Home", title: "My Files" },
+    chat: { crumb: "Home", title: "Ask Meridian" },
+    debt: { crumb: "Advisors", title: "Debt Coach" },
+    savings: { crumb: "Advisors", title: "Savings Guide" },
+    budget: { crumb: "Advisors", title: "Budget Helper" },
+    payoff: { crumb: "Advisors", title: "Payoff Planner" },
+    settings: { crumb: "Settings", title: "Settings" },
   }[view];
 
   const renderView = () => {
@@ -106,6 +174,8 @@ export default function App() {
       openChat: () => setTweak("chatOpen", true),
       onNav: setView,
       online,
+      userName,
+      onUserNameChange: handleUserNameChange,
     };
     switch (view) {
       case "dashboard": return <Dashboard {...props}/>;
@@ -127,7 +197,8 @@ export default function App() {
     <div className="app" data-chat={t.chatOpen ? "open" : "closed"}>
       {!online && <BackendOfflineBanner/>}
 
-      <Sidebar active={view} onNav={setView}/>
+      <Sidebar active={view} onNav={setView} userName={userName}/>
+      {showWelcome && <WelcomeModal onComplete={handleWelcomeComplete}/>}
 
       <main className="main" style={!online ? { paddingTop: 44 } : undefined}>
         <header className="topbar">
@@ -138,7 +209,7 @@ export default function App() {
           </span>
           <div className="topbar-spacer"/>
           <span className="topbar-pill">
-            <span className="dot"/> Local vault
+            <span className="dot"/> Private & Secure
           </span>
           <button className="icon-btn" title="Search"><I.search size={14}/></button>
           <button className="icon-btn" title="Notifications"><I.bell size={14}/></button>

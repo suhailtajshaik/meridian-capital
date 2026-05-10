@@ -276,12 +276,12 @@ function DashboardEmpty({ openChat, onNav }) {
       <div>
         <h2 className="h2" style={{ marginBottom: 8 }}>No data yet</h2>
         <p className="muted" style={{ fontSize: 13.5, maxWidth: 400, lineHeight: 1.6, margin: "0 auto" }}>
-          Drop a statement in <strong>Documents</strong> to populate your overview — net worth, debts, savings, and budget all derive from your uploaded files.
+          Upload a statement in <strong>My Files</strong> to get started — your net worth, debts, savings, and budget will all be calculated from your uploaded statements.
         </p>
       </div>
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center", marginTop: 8 }}>
         <button className="btn primary" onClick={() => onNav?.("documents")}>
-          <I.upload size={13}/> Go to Documents
+          <I.upload size={13}/> Upload Files
         </button>
         <button className="btn ghost" onClick={openChat}>
           <I.chat size={13}/> Ask advisor
@@ -490,7 +490,7 @@ export function Dashboard({ snapshot, snapshotStatus, loading, openChat, onNav }
             <I.doc size={22} style={{ color: "var(--ink-4)" }}/>
             <div>Upload a statement to see transactions.</div>
             <button className="btn ghost" style={{ fontSize: 12 }} onClick={() => onNav?.("documents")}>
-              Go to Documents
+              Go to My Files
             </button>
           </div>
         </div>

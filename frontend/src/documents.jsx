@@ -18,11 +18,11 @@ export function StatusPill({ status }) {
 
 /* Pipeline step labels — match the SSE stages emitted by /api/upload */
 const PIPELINE_STEPS = [
-  { key: "parse",     step: "Parse",     desc: "CSV / PDF / XLSX → typed rows" },
-  { key: "normalize", step: "Normalize", desc: "Snake-case columns, parsed dates" },
-  { key: "redact",    step: "Redact",    desc: "Merchant names + account numbers stripped" },
-  { key: "index",     step: "Index",     desc: "Per-session SQLite + raw file saved" },
-  { key: "analyze",   step: "Analyze",   desc: "4 advisor agents reason over your data" },
+  { key: "parse",     step: "Uploading",   desc: "Reading your file" },
+  { key: "normalize", step: "Processing",  desc: "Organizing your data" },
+  { key: "redact",    step: "Securing",    desc: "Protecting your privacy" },
+  { key: "index",     step: "Saving",      desc: "Saving to your device" },
+  { key: "analyze",   step: "Reviewing",   desc: "Reviewing your finances" },
 ];
 
 const STAGE_INDEX = Object.fromEntries(PIPELINE_STEPS.map((s, i) => [s.key, i]));

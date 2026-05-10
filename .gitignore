@@ -31,6 +31,9 @@ htmlcov/
 .env
 .env.*
 *.env
+# Allow example/template env files to be committed
+!.env.example
+!**/.env.example
 
 # Streamlit secrets
 .streamlit/secrets.toml
@@ -57,3 +60,14 @@ logs/
 
 # Claude
 .claude/
+
+# Backend runtime data
+backend/data/
+backend/data/*.db
+backend/venv/
+backend/.env
+__pycache__/
+*.pyc
+
+# Docker
+.docker/

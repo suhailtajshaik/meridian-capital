@@ -1,0 +1,37 @@
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    env_file: ./backend/.env
+    volumes:
+      # Hot-reload: mount source so uvicorn --reload picks up changes
+      - ./backend/app:/app/app
+      # Persist per-session SQLite DBs across container restarts
+      - ./backend/data:/app/data
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "5173:5173"
+    environment:
+      # The browser runs on the host, not inside Docker, so it reaches the
+      # backend via the host port-forward (localhost:8000), not the Docker
+      # network name. Keep this as localhost.
+      - VITE_API_BASE=http://localhost:8000
+    volumes:
+      # Hot-reload: mount only the source files, not the whole tree.
+      # The container's node_modules (installed during docker build) are
+      # preserved by the named volume below so the host bind-mount doesn't
+      # shadow them.
+      - ./frontend/src:/app/src
+      - ./frontend/index.html:/app/index.html
+      - ./frontend/vite.config.js:/app/vite.config.js
+      - frontend_node_modules:/app/node_modules
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  frontend_node_modules:

@@ -1,12 +1,13 @@
 import React from 'react';
 import { I } from './icons.jsx';
-import { PERSONAS } from './data.js';
 import { Sidebar } from './sidebar.jsx';
 import { ChatPanel } from './chat.jsx';
 import { Dashboard } from './dashboard.jsx';
 import { Documents } from './documents.jsx';
 import { DebtView, SavingsView, BudgetView, PayoffView, SettingsView } from './views.jsx';
 import { useTweaks, TweaksPanel, TweakSection, TweakToggle, TweakRadio, TweakSelect, TweakColor } from './tweaks-panel.jsx';
+import { useBackendStatus } from './hooks/useBackendStatus.js';
+import { useFinancialData } from './hooks/useFinancialData.js';
 
 /* Main app shell — routes views, manages chat panel + tweaks */
 
@@ -25,10 +26,37 @@ const ACCENT_MAP = {
   oxblood: { ink: "#3B1A1A", positive: "#1E6B52" },
 };
 
+/* ─── Backend-offline banner — rendered at the top of the app ─────────────── */
+function BackendOfflineBanner() {
+  return (
+    <div style={{
+      position: "fixed",
+      top: 0, left: 0, right: 0,
+      zIndex: 9999,
+      background: "var(--negative)",
+      color: "var(--surface)",
+      padding: "10px 20px",
+      display: "flex",
+      alignItems: "center",
+      gap: 10,
+      fontSize: 13,
+      fontWeight: 500,
+      boxShadow: "0 2px 8px rgba(0,0,0,0.2)",
+    }}>
+      <I.alert size={14} style={{ flexShrink: 0 }}/>
+      <span>
+        Backend unreachable at <code style={{ fontFamily: "var(--font-mono)", fontSize: 12, background: "rgba(255,255,255,0.15)", padding: "1px 5px", borderRadius: 4 }}>http://localhost:8000</code>.
+        Run <code style={{ fontFamily: "var(--font-mono)", fontSize: 12, background: "rgba(255,255,255,0.15)", padding: "1px 5px", borderRadius: 4 }}>docker compose up</code> from the repo root.
+      </span>
+    </div>
+  );
+}
+
 export default function App() {
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
   const [view, setView] = React.useState("documents");
-  const persona = PERSONAS.midcareer;
+  const { online, model } = useBackendStatus();
+  const financialData = useFinancialData();
 
   React.useEffect(() => {
     document.documentElement.setAttribute("data-theme", t.theme);
@@ -50,6 +78,9 @@ export default function App() {
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
+  const ADVISOR_SCOPE_MAP = { debt: "debt", savings: "savings", budget: "budget", payoff: "payoff" };
+  const advisorScope = ADVISOR_SCOPE_MAP[view] ?? null;
+
   const titleFor = {
     dashboard: { crumb: "Overview", title: "Dashboard" },
     documents: { crumb: "Ingestion", title: "Documents" },
@@ -62,7 +93,20 @@ export default function App() {
   }[view];
 
   const renderView = () => {
-    const props = { persona, openChat: () => setTweak("chatOpen", true), onNav: setView };
+    const props = {
+      snapshot: financialData.snapshot,
+      loading: financialData.loading,
+      clearAll: financialData.clearAll,
+      uploadFile: financialData.uploadFile,
+      uploading: financialData.uploading,
+      uploadError: financialData.uploadError,
+      snapshotStatus: financialData.snapshotStatus,
+      startPolling: financialData.startPolling,
+      refresh: financialData.refresh,
+      openChat: () => setTweak("chatOpen", true),
+      onNav: setView,
+      online,
+    };
     switch (view) {
       case "dashboard": return <Dashboard {...props}/>;
       case "documents": return <Documents {...props}/>;
@@ -81,9 +125,11 @@ export default function App() {
 
   return (
     <div className="app" data-chat={t.chatOpen ? "open" : "closed"}>
-      <Sidebar active={view} onNav={setView} persona={persona}/>
+      {!online && <BackendOfflineBanner/>}
 
-      <main className="main">
+      <Sidebar active={view} onNav={setView}/>
+
+      <main className="main" style={!online ? { paddingTop: 44 } : undefined}>
         <header className="topbar">
           <span className="topbar-title">
             <span className="muted">{titleFor.crumb}</span>
@@ -101,6 +147,24 @@ export default function App() {
             <I.panel size={14}/>
           </button>
         </header>
+        {financialData.snapshotStatus === "computing" && (
+          <div style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            padding: "0 20px",
+            height: 32,
+            background: "var(--surface-2)",
+            borderLeft: "3px solid var(--info)",
+            borderBottom: "1px solid var(--line)",
+            fontSize: 12.5,
+            color: "var(--ink-2)",
+            flexShrink: 0,
+          }}>
+            <span className="spinner" style={{ width: 11, height: 11, borderColor: "var(--info)", borderTopColor: "transparent", flexShrink: 0 }}/>
+            Advisors are analyzing your data… this typically takes 30–60 seconds.
+          </div>
+        )}
         {renderView()}
       </main>
 
@@ -108,6 +172,9 @@ export default function App() {
         open={t.chatOpen}
         onClose={() => setTweak("chatOpen", false)}
         prominentAgents={t.agentVisibility === "prominent"}
+        online={online}
+        model={model}
+        advisorScope={advisorScope}
       />
 
       <Tweaks t={t} setTweak={setTweak}/>
@@ -156,4 +223,3 @@ function Tweaks({ t, setTweak }) {
     </TweaksPanel>
   );
 }
-

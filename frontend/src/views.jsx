@@ -83,7 +83,7 @@ function EmptyState({ icon: Ico, heading, body, onNav }) {
       </div>
       {onNav && (
         <button className="btn primary" onClick={() => onNav("documents")} style={{ marginTop: 4 }}>
-          <I.upload size={13}/> Go to Documents
+          <I.upload size={13}/> Upload Files
         </button>
       )}
     </div>
@@ -751,17 +751,18 @@ export function PayoffView({ snapshot, snapshotStatus, onNav }) {
 }
 
 /* ---------------- Settings & Security ---------------- */
-export function SettingsView({ clearAll, onNav }) {
+export function SettingsView({ clearAll, onNav, userName, onUserNameChange }) {
   const securityChecks = [
-    { label: "localhost-only binding", desc: "Server binds to 127.0.0.1 — not reachable from the network by default", status: "ok" },
-    { label: "CORS-locked to local origin", desc: "API rejects cross-origin requests; only the local frontend can call the backend", status: "ok" },
-    { label: "PII redaction before LLM", desc: "Account numbers, SSN, and names are stripped by anonymizer.py before any prompt reaches the language model", status: "ok" },
-    { label: "Single external egress", desc: "The only outbound connection is to OpenRouter for LLM inference — no other third-party calls", status: "ok" },
-    { label: "Session-scoped SQLite isolation", desc: "Each browser session writes to its own SQLite database; sessions cannot read each other's data", status: "ok" },
-    { label: "Read-only ingestion", desc: "No agent can move money — statements are ingested read-only and no write access to financial accounts is requested", status: "ok" },
-    { label: "Wipe on demand", desc: "Clear all session data — documents, extracted tables, and the financial snapshot — via the button below", status: "ok" },
+    { label: "Runs only on your device", desc: "Your data never leaves this machine — the app runs entirely on your computer", status: "ok" },
+    { label: "Protected from external access", desc: "The app can only be accessed from your browser on this device", status: "ok" },
+    { label: "Your info is protected", desc: "Personal details like account numbers are automatically hidden before the AI sees them", status: "ok" },
+    { label: "One secure AI connection", desc: "The only external connection is to the AI for answers — no data is shared with anyone else", status: "ok" },
+    { label: "Your session stays private", desc: "Your financial data is isolated to your browser session and cannot be seen by others", status: "ok" },
+    { label: "Cannot access your accounts", desc: "Advisors can only read your uploaded statements — they cannot make transactions or access your accounts", status: "ok" },
+    { label: "Delete everything anytime", desc: "You can clear all your data at any time using the button below", status: "ok" },
   ];
 
+  const [nameInput, setNameInput] = React.useState(userName || "");
   const [confirmNuke, setConfirmNuke] = React.useState(false);
   const [nuking, setNuking] = React.useState(false);
 
@@ -777,30 +778,62 @@ export function SettingsView({ clearAll, onNav }) {
 
   return (
     <div className="scroll" data-screen-label="07 Settings">
-      <ViewHeader title="Settings & security"
-        sub="Data stays on this host. PII is redacted before reaching the LLM. The only external call is to OpenRouter for inference."/>
+      <ViewHeader title="Settings"
+        sub="Your data stays on this device and is never shared. You can delete everything at any time."/>
+
+      {/* Profile section */}
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="card-title">Your profile</div>
+        <div style={{ marginTop: 12 }}>
+          <label style={{ fontSize: 12.5, fontWeight: 500, color: "var(--ink-2)", display: "block", marginBottom: 6 }}>
+            First name
+          </label>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <input
+              type="text"
+              value={nameInput}
+              onChange={(e) => setNameInput(e.target.value)}
+              placeholder="Your name"
+              style={{
+                padding: "8px 12px", fontSize: 14,
+                border: "1.5px solid var(--line)", borderRadius: 6,
+                background: "var(--surface)", color: "var(--ink)",
+                outline: "none", flex: 1, maxWidth: 240,
+              }}
+            />
+            <button
+              className="btn primary"
+              style={{ fontSize: 13, padding: "8px 14px" }}
+              onClick={() => { const n = nameInput.trim(); if (n) onUserNameChange?.(n); }}
+              disabled={!nameInput.trim() || nameInput.trim() === userName}
+            >
+              Save
+            </button>
+          </div>
+        </div>
+      </div>
 
       <div className="grid-2">
         <div className="card" style={{ background: "var(--positive-tint)", borderColor: "transparent" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--positive)" }}>
             <I.shield size={16}/>
-            <div style={{ fontSize: 11.5, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase" }}>Vault status</div>
+            <div style={{ fontSize: 11.5, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase" }}>Privacy status</div>
           </div>
-          <div style={{ fontSize: 18, fontWeight: 500, color: "var(--positive)", marginTop: 8 }}>Session-scoped · local SQLite</div>
-          <div style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 4 }}>Per-session isolation · wipe-on-demand</div>
+          <div style={{ fontSize: 18, fontWeight: 500, color: "var(--positive)", marginTop: 8 }}>Your data is private</div>
+          <div style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 4 }}>Stored locally · never shared</div>
         </div>
         <div className="card">
-          <div className="card-title">Agent permissions</div>
-          <div className="num" style={{ fontSize: 18, marginTop: 8 }}>Read-only</div>
-          <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>No agent can initiate transfers — statements are read-only</div>
+          <div className="card-title">Advisor access</div>
+          <div className="num" style={{ fontSize: 18, marginTop: 8 }}>View only</div>
+          <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>Advisors read your statements but cannot access or modify your accounts</div>
         </div>
       </div>
 
       <div className="card" style={{ marginTop: 16 }}>
         <div className="card-head">
           <div>
-            <div className="card-title">Security checklist</div>
-            <div className="card-sub">{securityChecks.filter(s => s.status === "ok").length} of {securityChecks.length} complete</div>
+            <div className="card-title">Privacy & Security</div>
+            <div className="card-sub">{securityChecks.filter(s => s.status === "ok").length} of {securityChecks.length} protections active</div>
           </div>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
@@ -838,13 +871,13 @@ export function SettingsView({ clearAll, onNav }) {
       <div className="card" style={{ marginTop: 16 }}>
         <div className="card-head">
           <div>
-            <div className="card-title">Data management</div>
-            <div className="card-sub">Remove all session data from the backend and reset the advisor</div>
+            <div className="card-title">Clear your data</div>
+            <div className="card-sub">Remove all uploaded files and reset your advisor</div>
           </div>
         </div>
         <div style={{ padding: "16px 0" }}>
           <div style={{ fontSize: 13, color: "var(--ink-2)", marginBottom: 16, lineHeight: 1.55 }}>
-            This deletes all uploaded files, embeddings, and the financial snapshot for this session. The conversation history is also cleared. This action cannot be undone.
+            This removes all your uploaded files and financial data from this device. Your conversation history will also be cleared. This cannot be undone.
           </div>
           {confirmNuke ? (
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>

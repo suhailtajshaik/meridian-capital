@@ -150,7 +150,7 @@ export default function App() {
   const advisorScope = ADVISOR_SCOPE_MAP[view] ?? null;
 
   const titleFor = {
-    dashboard: { crumb: "Home", title: "Home" },
+    dashboard: { crumb: "Home", title: "Welcome!" },
     documents: { crumb: "Home", title: "My Files" },
     chat: { crumb: "Home", title: "Ask Meridian" },
     debt: { crumb: "Advisors", title: "Debt Coach" },

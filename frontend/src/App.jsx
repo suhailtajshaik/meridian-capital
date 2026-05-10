@@ -177,6 +177,7 @@ export default function App() {
       uploadError: financialData.uploadError,
       snapshotStatus: financialData.snapshotStatus,
       startPolling: financialData.startPolling,
+      onSnapshotReceived: financialData.onSnapshotReceived,
       refresh: financialData.refresh,
       openChat: () => setTweak("chatOpen", true),
       onNav: setView,

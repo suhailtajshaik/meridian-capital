@@ -2,20 +2,6 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { getSnapshot, uploadFile as apiUploadFile, deleteData, getSnapshotStatus } from '../lib/api.js';
 import { getSessionId, clearSessionId } from '../lib/session.js';
 
-/**
- * useFinancialData — manages snapshot + upload state.
- *
- * Returns:
- *   snapshot        — Snapshot | null
- *   loading         — boolean
- *   error           — Error | null
- *   uploadFile      — (file: File) => Promise<{ rows, columns, table_name, snapshot }>
- *   uploading       — boolean
- *   uploadError     — Error | null
- *   snapshotStatus  — "ready"|"computing"|"stale"|"none"|null
- *   refresh         — () => Promise<void>  re-fetches snapshot from backend
- *   clearAll        — () => Promise<void>  DELETE /api/data/:session_id + clears local state
- */
 export function useFinancialData() {
   const [snapshot, setSnapshot] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -27,22 +13,28 @@ export function useFinancialData() {
   const pollTimerRef = useRef(null);
   const pollActiveRef = useRef(false);
 
+  // Returns the fetched data so callers can know if they got real data.
+  // Only updates snapshot state when data is non-null — never wipes existing
+  // snapshot due to a transient 404 during a polling race.
   const fetchSnapshot = useCallback(async (signal) => {
     const sessionId = getSessionId();
     setLoading(true);
     setError(null);
     try {
       const data = await getSnapshot(sessionId, signal);
-      if (signal?.aborted) return;
-      setSnapshot(data);
+      if (signal?.aborted) return null;
+      if (data != null) setSnapshot(data);
+      return data;
     } catch (err) {
-      if (err.name === 'AbortError') return;
+      if (err.name === 'AbortError') return null;
       setError(err);
+      return null;
     } finally {
       if (!signal?.aborted) setLoading(false);
     }
   }, []);
 
+  // Initial mount: always run; if 404 the snapshot stays null (correct for fresh session)
   useEffect(() => {
     const controller = new AbortController();
     fetchSnapshot(controller.signal);
@@ -67,6 +59,8 @@ export function useFinancialData() {
     pollActiveRef.current = true;
     setSnapshotStatus('computing');
 
+    let noneRetries = 0;
+
     const poll = async () => {
       if (!pollActiveRef.current) return;
       const sessionId = getSessionId();
@@ -75,10 +69,21 @@ export function useFinancialData() {
         if (!pollActiveRef.current) return;
         if (result.status === 'ready') {
           stopPolling();
-          try { await refresh(); } catch {}
+          // Retry refresh until we get real data — the REST endpoint may lag
+          // slightly behind the status endpoint on the backend.
+          let data = null;
+          for (let attempt = 0; attempt < 5 && !data; attempt++) {
+            if (attempt > 0) await new Promise(r => setTimeout(r, 1500));
+            try { data = await refresh(); } catch {}
+          }
           setSnapshotStatus('ready');
         } else if (result.status === 'computing') {
+          noneRetries = 0;
           setSnapshotStatus('computing');
+          pollTimerRef.current = setTimeout(poll, 3000);
+        } else if (result.status === 'none' && noneRetries < 6) {
+          // Background task may not have registered yet — retry up to ~18 s
+          noneRetries++;
           pollTimerRef.current = setTimeout(poll, 3000);
         } else {
           setSnapshotStatus(result.status);
@@ -93,6 +98,22 @@ export function useFinancialData() {
 
     poll();
   }, [refresh, stopPolling]);
+
+  // Called by Documents when the SSE stream delivers the snapshot event.
+  // Uses inline data when available; otherwise retries the REST endpoint.
+  const onSnapshotReceived = useCallback(async (eventData) => {
+    stopPolling();
+    if (eventData != null) {
+      setSnapshot(eventData);
+    } else {
+      let data = null;
+      for (let i = 0; i < 4 && !data; i++) {
+        if (i > 0) await new Promise(r => setTimeout(r, 1500));
+        try { data = await refresh(); } catch {}
+      }
+    }
+    setSnapshotStatus('ready');
+  }, [stopPolling, refresh]);
 
   useEffect(() => {
     return () => stopPolling();
@@ -125,7 +146,7 @@ export function useFinancialData() {
     try {
       await deleteData(sessionId);
     } catch {
-      // Best-effort — clear locally even if the backend call fails
+      // best-effort
     }
     clearSessionId();
     setSnapshot(null);
@@ -133,5 +154,5 @@ export function useFinancialData() {
     setSnapshotStatus(null);
   }, [stopPolling]);
 
-  return { snapshot, loading, error, uploadFile, uploading, uploadError, snapshotStatus, startPolling, refresh, clearAll };
+  return { snapshot, loading, error, uploadFile, uploading, uploadError, snapshotStatus, startPolling, onSnapshotReceived, refresh, clearAll };
 }

@@ -1,38 +1,84 @@
 # meridian-capital
 
-**Meridian** — a local-first, multi-agent personal finance advisor.
-React + Vite frontend, FastAPI + LangGraph backend, OpenRouter LLM. Hackathon project.
+**Meridian** is a local-first, multi-agent personal finance advisor.
+It pairs a React + Vite frontend with a FastAPI + LangGraph backend, using an OpenRouter LLM for reasoning.
+This repo demonstrates a hackathon-grade architecture for safe financial advice: private local data ingestion, structured agent outputs, and visible multi-agent reasoning.
 
-A supervisor agent decomposes your questions and routes them to four
-specialists (Debt Analyzer, Budget Coach, Savings Strategist, Payoff
-Optimizer), all reasoning over a private document vault. Raw transactions
-never leave your machine — only category aggregates are sent to the LLM.
+---
 
-## Demo
+## What this project is
 
-[![Meridian demo video](https://img.shields.io/badge/watch-demo-blue)](demo/C6-Group3-Meridian.mp4)
+Meridian helps users explore personal finance using uploaded statements and transaction data.
+The application includes:
 
-<video src="demo/C6-Group3-Meridian.mp4" controls width="720"></video>
+- a document ingestion experience for CSV/XLSX/PDF financial exports
+- a local session vault stored in SQLite
+- a private analytics snapshot for net worth, budgets, and payoff plans
+- a conversational advisor powered by a supervisor and specialist agents
+- a streaming trace UI that exposes how decisions are routed and composed
 
-> If the embedded player doesn't render on your viewer, download or open
-> [`demo/C6-Group3-Meridian.mp4`](demo/C6-Group3-Meridian.mp4) directly.
+The system is built so that raw financial statements stay local and only LLM-safe summary data is shared with the model.
 
-## Run
+---
+
+## Architecture overview
+
+The architecture diagram is available in `architecture.excalidraw` at the repo root. Open it to view the frontend/backend flow, agent orchestration, privacy boundaries, and session storage model.
+
+### High-level flow
+
+1. User uploads financial documents in the frontend.
+2. The backend parses files and normalizes raw rows into a standard dataset.
+3. A privacy layer anonymizes and aggregates transactions into category-level facts.
+4. The local session database stores the clean snapshot and queryable tables.
+5. The user asks the advisor a question.
+6. The supervisor agent routes the request to specialist agents.
+7. Structured agent outputs are generated, validated, and streamed back via SSE.
+8. The frontend renders the advice, dashboard, and orchestration trace.
+
+### Components
+
+- **Frontend**: React + Vite app serving the user interface, upload experience, dashboard, chat, and visual trace.
+- **Backend**: FastAPI app exposing `api/upload`, `api/chat`, `api/snapshot`, `api/data`, and health endpoints.
+- **Agents**: LangGraph-based supervisor + specialist agents for debt, budget, savings, and payoff reasoning.
+- **Ingestion**: parser, anonymizer, and tabular RAG components that turn uploaded statements into safe, queryable data.
+- **Session storage**: per-session SQLite files under `backend/data/{session_id}.db`.
+
+### Agent architecture
+
+Meridian uses a layered multi-agent design:
+
+- `supervisor.py` routes questions to the right specialist(s) and composes final answers.
+- `debt_analyzer.py` analyzes debts, interest, and payoff risk.
+- `budget_coach.py` evaluates spending, budgets, and savings opportunities.
+- `savings_strategist.py` recommends cash reserves, investments, and buffers.
+- `payoff_optimizer.py` compares payoff strategies like avalanche, snowball, and minimum payments.
+
+The backend also includes `base.py` with a self-correcting agent wrapper: it validates outputs and retries when LLM responses are malformed.
+
+### Data privacy model
+
+- The backend binds only to `127.0.0.1`.
+- CORS permits only `http://localhost:5173`.
+- Raw uploaded transactions are parsed locally and never sent directly to the LLM.
+- `ingestion/anonymizer.py` converts raw rows into category aggregates and strips PII details.
+- Only aggregated, LLM-safe facts are used for model prompts.
+- The only outbound network call is to the OpenRouter LLM service.
+
+---
+
+## Run the app
 
 ### Run with Docker (recommended)
 
-**Prerequisites:** Docker Desktop (or Docker Engine + Compose plugin).
+Prerequisites: Docker Desktop or Docker Engine with Compose plugin.
 
-1. Copy the env template and add your key:
+1. Copy the backend env template and configure your key:
 
    ```sh
    cp backend/.env.example backend/.env
-   # open backend/.env and set OPENROUTER_API_KEY=sk-or-v1-...
+   # edit backend/.env and set OPENROUTER_API_KEY=sk-or-v1-...
    ```
-
-   Get an OpenRouter key at https://openrouter.ai. Default model is
-   `google/gemini-2.5-flash` — override via `OPENROUTER_MODEL`
-   in `backend/.env` (e.g. `google/gemini-2.5-flash` for budget mode).
 
 2. Start the full stack:
 
@@ -40,141 +86,150 @@ never leave your machine — only category aggregates are sent to the LLM.
    docker compose up
    ```
 
-   First run builds both images (a minute or two). Subsequent runs start in
-   seconds. Both services support hot-reload — edit `backend/app/` or
-   `frontend/src/` and changes appear immediately without restarting.
+3. Open `http://localhost:5173` in your browser.
 
-3. Open **http://localhost:5173** in your browser.
+To stop the stack, press `Ctrl-C` and run:
 
-To stop: `Ctrl-C`, then `docker compose down`.
-
-**Privacy note:** Both containers run entirely on your machine. The only
-network egress is the LLM hop to OpenRouter. Your financial data stays local.
-
----
+```sh
+docker compose down
+```
 
 ### Run without Docker
 
-You need two terminals. Backend first (so the frontend can detect it on `/api/health`).
+Open two terminal windows.
 
-#### Terminal 1 — backend
+#### Backend
 
 ```sh
 cd backend
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env       # then edit and add your OPENROUTER_API_KEY
+cp .env.example .env
+# edit backend/.env and set OPENROUTER_API_KEY
 uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-Get an OpenRouter key at https://openrouter.ai. Default model is
-`google/gemini-2.5-flash` — override via `OPENROUTER_MODEL`
-in `.env` (e.g. `google/gemini-2.5-flash` for budget mode).
-
-#### Terminal 2 — frontend
+#### Frontend
 
 ```sh
 cd frontend
-npm install      # first time only
+npm install
 npm run dev
 ```
 
-Opens at `http://localhost:5173`.
+Open `http://localhost:5173` once both services are running.
 
-If the backend is offline, the UI shows a prominent error banner with
-the docker command to bring it up. There is no mock fallback — the app
-is fully driven by the live backend.
+---
 
-## Layout
+## File structure
 
 ```
 meridian-capital/
-├── backend/                   FastAPI + LangGraph agent engine
-│   ├── requirements.txt · .env.example · README.md
+├── backend/                       FastAPI + LangGraph finance agent engine
+│   ├── Dockerfile
+│   ├── README.md
+│   ├── requirements.txt
+│   ├── .env.example
 │   └── app/
-│       ├── main.py            FastAPI: /api/upload /api/chat (SSE) /api/snapshot /api/data /api/health
-│       ├── config.py · llm.py
+│       ├── main.py                FastAPI routes and SSE chat API
+│       ├── config.py              app configuration and environment loading
+│       ├── llm.py                 OpenRouter / model request helpers
 │       ├── agents/
-│       │   ├── schemas.py     Pydantic v2 contracts (frontend depends on these shapes)
-│       │   ├── base.py        SelfCorrectingAgent — retry + structured output
-│       │   ├── debt_analyzer.py · budget_coach.py
-│       │   ├── savings_strategist.py · payoff_optimizer.py
-│       │   ├── supervisor.py  intent classifier
-│       │   └── graph.py       LangGraph StateGraph + SqliteSaver checkpointing
+│       │   ├── base.py            self-correcting agent wrapper + structured output validation
+│       │   ├── supervisor.py      intent routing and orchestration
+│       │   ├── debt_analyzer.py
+│       │   ├── budget_coach.py
+│       │   ├── savings_strategist.py
+│       │   ├── payoff_optimizer.py
+│       │   ├── graph.py           LangGraph StateGraph with SqliteSaver checkpointing
+│       │   └── schemas.py         Pydantic v2 contracts used by both backend and frontend
 │       ├── ingestion/
-│       │   ├── parser.py      CSV / XLSX / PDF → DataFrame
-│       │   ├── anonymizer.py  raw rows → category aggregates (LLM-safe)
-│       │   └── tabular_rag.py NL → SQL over uploaded data
-│       └── utils/math_engine.py   amortization, avalanche / snowball
+│       │   ├── parser.py          CSV / XLSX / PDF parsing into normalized tables
+│       │   ├── anonymizer.py       raw → category aggregates for privacy-safe prompts
+│       │   └── tabular_rag.py      natural language SQL query layer over uploaded data
+│       └── utils/
+│           └── math_engine.py     amortization, payoff projections, avalanche / snowball math
 │
-├── frontend/                  React + Vite UI
+├── frontend/                      React + Vite user interface
+│   ├── Dockerfile
+│   ├── README.md
+│   ├── package.json
+│   ├── vite.config.js
 │   └── src/
-│       ├── main.jsx · App.jsx · sidebar.jsx
-│       ├── chat.jsx · dashboard.jsx · documents.jsx · views.jsx
-│       ├── charts.jsx · icons.jsx · tweaks-panel.jsx
-│       ├── data.js            AGENT_META only (UI chrome — no financial data)
-│       ├── lib/api.js · session.js
-│       ├── hooks/useAgentStream.js · useFinancialData.js · useBackendStatus.js
-│       └── index.css
+│       ├── main.jsx              application entrypoint
+│       ├── App.jsx               app shell, navigation, and layout
+│       ├── sidebar.jsx           main navigation menu
+│       ├── chat.jsx              advisor chat panel + trace rendering
+│       ├── dashboard.jsx         live snapshot dashboard views
+│       ├── documents.jsx         document upload / ingestion UI
+│       ├── views.jsx             detail views for debt, savings, budget, payoff, settings
+│       ├── charts.jsx            visualizations and charts
+│       ├── icons.jsx             inline icon components
+│       ├── tweaks-panel.jsx      design / debug tweak controls
+│       ├── data.js               static metadata and seed UI data
+│       ├── lib/api.js            backend API client helpers
+│       ├── lib/session.js        session management helpers
+│       └── hooks/
+│           ├── useAgentStream.js
+│           ├── useBackendStatus.js
+│           └── useFinancialData.js
 │
-├── sample_data/               seed CSVs to drag into the Documents tab
-│   ├── chase_checking_apr2026.csv      (142 rows)
-│   ├── capital_one_apr2026.csv         (41 rows)
-│   ├── honda_auto_loan.csv             (24 rows · amortization)
-│   ├── schwab_brokerage_q1.csv         (18 rows · holdings + activity)
-│   ├── wells_mortgage_q1.csv           (3 rows · statement summary)
-│   └── sofi_student_loan_apr.csv       (1 row · loan statement)
-│
-└── docs/
-    ├── financial-advisor-hackathon-plan.md
-    └── overnight-hackathon-plan-refined.md
+├── sample_data/                  example files for the demo flow
+├── docs/                         planning notes and hackathon docs
+└── demo/                         video walkthrough and demo assets
 ```
 
-## Demo path
+---
 
-1. **Documents** → drop the six files from `sample_data/`. The 5-step
-   pipeline (Parse → Normalize → Redact → Embed → Index) is now driven by
-   real upload progress. On success, the snapshot endpoint kicks off and
-   the dashboard switches from "Demo data" to "Live data".
-2. **Dashboard** → net worth, debt breakdown, budget 50/30/20, payoff
-   timeline — all rendered from the live snapshot when present.
-3. **Advisor chat** → ask *"I just got a $3,200 bonus. What should I do
-   with it?"* — open the **"How I answered this"** trace under the reply
-   to watch supervisor → debt → payoff → savings → synth in real time.
-   Each `TraceEvent` is streamed via SSE as the LangGraph runs.
-4. **Payoff** → toggle Snowball / Avalanche / Min — chart re-projects.
-5. **Settings** → local-first vault status + security checklist + nuke
-   button (calls `DELETE /api/data/:session_id`).
+## User flow
 
-The orchestration trace under chat replies is the hackathon-judge moment —
-it makes the multi-agent architecture *visible* instead of hidden behind
-a polished output.
+1. Open the app and go to the `Documents` tab.
+2. Drag the sample files from `sample_data/` into the upload area.
+3. Wait for ingestion to complete and a snapshot to appear.
+4. Visit `Dashboard` to review net worth, debt breakdown, budget guidance, and payoff projections.
+5. Ask the advisor a question in the `Advisor chat` view.
+6. Expand the trace under the answer to inspect supervisor decisions and specialist reasoning.
 
-## Security model
+---
 
-- Backend binds `127.0.0.1` only. CORS locked to `http://localhost:5173`.
-- Per-session SQLite at `backend/data/{session_id}.db`. Wiped via
-  `DELETE /api/data/{session_id}`.
-- Raw transactions never reach the LLM — `ingestion/anonymizer.py`
-  aggregates to category sums and strips merchant / account / PII before
-  the prompt is built.
-- The LLM hop (OpenRouter) is the only network egress. The UI shows a
-  consent banner explaining this.
+## Notes for developers
 
-## What's real today
+- `frontend/src/data.js` contains UI metadata and seeded persona/chat examples. The app uses real backend data once ingestion is complete.
+- `backend/app/agents/schemas.py` defines the API contracts shared by the frontend and backend.
+- `backend/app/agents/graph.py` manages LangGraph state, checkpoints, and replayable agent execution.
+- `backend/app/ingestion/tabular_rag.py` adds a natural language SQL layer for querying uploaded tables.
+- The agent trace is streamed from the backend as Server-Sent Events (SSE) and displayed live in the chat panel.
 
-| Layer | Status |
+---
+
+## Security and privacy
+
+- All data is processed locally on the machine running the app.
+- The only external network access is the OpenRouter LLM endpoint.
+- Session data is stored in plain SQLite under `backend/data/`, with a wipe endpoint available.
+- No JWT auth is implemented; the current app uses session IDs only.
+
+---
+
+## Current status
+
+| Capability | Status |
 |---|---|
-| File upload + parse (CSV / XLSX / PDF) | real |
-| Anonymizer (raw → category aggregates) | real |
-| Pydantic-structured agent outputs | real |
-| Self-correcting retry loop on validation errors | real |
-| LangGraph supervisor + 4 specialists | real |
-| SSE trace streaming under chat replies | real |
-| Tabular RAG (NL → SQL) | real |
-| Frontend dashboard from live snapshot | real — empty states when no data, no mock fallback |
-| Auth (JWT) | skipped per refined plan — session_id only |
-| SQLCipher encryption | skipped — plain SQLite, wipe-on-demand |
+| Document upload and parse | implemented |
+| Data anonymization for LLM prompts | implemented |
+| Multi-agent supervisor + specialist reasoning | implemented |
+| Structured agent output validation | implemented |
+| SSE stream of agent traces | implemented |
+| Dashboard snapshot rendering | implemented |
+| Auth / encryption | intentionally skipped |
 
-Start backend, then frontend, then `Documents → Upload → Dashboard → Chat`.
+---
+
+## Helpful links
+
+- `backend/README.md` — backend developer notes
+- `frontend/README.md` — frontend run/build notes
+- `docs/` — planning and architecture notes
+- `sample_data/` — demo files to upload
+- `demo/` — video walkthrough

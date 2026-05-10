@@ -54,7 +54,7 @@ function formatSize(b) {
   return (b / 1024 / 1024).toFixed(1) + " MB";
 }
 
-export function Documents({ online, onNav, uploadFile: apiUpload, uploading, uploadError, refresh, snapshotStatus, startPolling }) {
+export function Documents({ online, onNav, uploadFile: apiUpload, uploading, uploadError, refresh, snapshotStatus, startPolling, onSnapshotReceived }) {
 
   const [drag, setDrag] = React.useState(false);
   const [docs, setDocs] = React.useState([]);
@@ -206,7 +206,7 @@ export function Documents({ online, onNav, uploadFile: apiUpload, uploading, upl
               updateAgent(null);
               updateStatus('ready');
               loadDocs().catch(() => {});
-              refresh().catch(() => {});
+              onSnapshotReceived?.(event.snapshot);
             }
           },
         });

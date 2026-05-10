@@ -8,6 +8,15 @@ specialists (Debt Analyzer, Budget Coach, Savings Strategist, Payoff
 Optimizer), all reasoning over a private document vault. Raw transactions
 never leave your machine — only category aggregates are sent to the LLM.
 
+## Demo
+
+[![Meridian demo video](https://img.shields.io/badge/watch-demo-blue)](demo/C6-Group3-Meridian.mp4)
+
+<video src="demo/C6-Group3-Meridian.mp4" controls width="720"></video>
+
+> If the embedded player doesn't render on your viewer, download or open
+> [`demo/C6-Group3-Meridian.mp4`](demo/C6-Group3-Meridian.mp4) directly.
+
 ## Run
 
 ### Run with Docker (recommended)

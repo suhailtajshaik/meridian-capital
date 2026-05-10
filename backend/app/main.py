@@ -300,6 +300,10 @@ async def _upload_event_stream(
         # before the background snapshot task has a chance to call _persist_session itself.
         _persist_session(session_id)
 
+        # Schedule before emitting ingest_complete so the status endpoint
+        # returns "computing" if the frontend polls in the same event-loop tick.
+        _schedule_snapshot(session_id)
+
         # Emit ingest_complete with metadata
         yield _sse({
             "type": "ingest_complete",
@@ -312,7 +316,6 @@ async def _upload_event_stream(
             "document": doc_entry,
         })
 
-        _schedule_snapshot(session_id)
         yield _sse({"type": "snapshot_pending", "session_id": session_id})
         yield _sse({"type": "done"})
     finally:

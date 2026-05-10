@@ -34,13 +34,6 @@ export function useFinancialData() {
     }
   }, []);
 
-  // Initial mount: always run; if 404 the snapshot stays null (correct for fresh session)
-  useEffect(() => {
-    const controller = new AbortController();
-    fetchSnapshot(controller.signal);
-    return () => controller.abort();
-  }, [fetchSnapshot]);
-
   const refresh = useCallback(() => {
     const controller = new AbortController();
     return fetchSnapshot(controller.signal);
@@ -81,9 +74,12 @@ export function useFinancialData() {
           noneRetries = 0;
           setSnapshotStatus('computing');
           pollTimerRef.current = setTimeout(poll, 3000);
-        } else if (result.status === 'none' && noneRetries < 6) {
-          // Background task may not have registered yet — retry up to ~18 s
+        } else if ((result.status === 'none' || result.status === 'stale') && noneRetries < 6) {
+          // 'none': background task may not have registered yet — retry up to ~18 s.
+          // 'stale': race window between ingest_complete SSE emit and _schedule_snapshot
+          //          being stored — keep showing computing state and retry.
           noneRetries++;
+          setSnapshotStatus('computing');
           pollTimerRef.current = setTimeout(poll, 3000);
         } else {
           setSnapshotStatus(result.status);
@@ -114,6 +110,25 @@ export function useFinancialData() {
     }
     setSnapshotStatus('ready');
   }, [stopPolling, refresh]);
+
+  // Initial mount: fetch snapshot; if none exists, check whether analysis is already
+  // running (e.g. after a browser refresh mid-analysis) and resume polling if so.
+  useEffect(() => {
+    const controller = new AbortController();
+    const sessionId = getSessionId();
+    (async () => {
+      const data = await fetchSnapshot(controller.signal);
+      if (data == null && !controller.signal.aborted) {
+        try {
+          const { status } = await getSnapshotStatus(sessionId, controller.signal);
+          if (!controller.signal.aborted && status === 'computing') {
+            startPolling();
+          }
+        } catch { /* fresh session or backend offline — ignore */ }
+      }
+    })();
+    return () => controller.abort();
+  }, [fetchSnapshot, startPolling]);
 
   useEffect(() => {
     return () => stopPolling();

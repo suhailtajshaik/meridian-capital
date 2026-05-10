@@ -71,5 +71,3 @@ __pycache__/
 
 # Docker
 .docker/
-demo/*.mov
-demo/*.mp4

@@ -16,6 +16,7 @@ Document types detected by column heuristics:
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime
 
 import pandas as pd
@@ -139,6 +140,29 @@ def _summarize_transactions(df: pd.DataFrame) -> dict:
         if not last_balance.empty:
             summary["current_balance"] = round(float(last_balance.iloc[-1]), 2)
 
+    description_col = next((c for c in ["description", "merchant"] if c in df.columns), None)
+    if description_col:
+        descs = df[description_col].dropna().astype(str)
+        apr_match = descs.str.extract(r"(\d{1,2}\.\d{1,2})\s*%\s*APR", flags=re.IGNORECASE).iloc[:, 0].dropna()
+        if not apr_match.empty:
+            try:
+                summary["apr"] = round(float(apr_match.iloc[0]), 2)
+            except ValueError:
+                pass
+        if "Interest" in df.get("category", pd.Series(dtype=object)).astype(str).values:
+            interest_total = df.loc[df["category"].astype(str).str.lower() == "interest", "_amount"].abs().sum()
+            if interest_total > 0:
+                summary["interest_charged_period"] = round(float(interest_total), 2)
+        payment_total = df.loc[df["_amount"] > 0, "_amount"].sum()
+        if payment_total > 0 and balance_col == "balance_owed":
+            summary["payment_received_period"] = round(float(payment_total), 2)
+
+    if balance_col == "balance_owed" and "current_balance" in summary:
+        summary["doc_type"] = "credit_card_statement"
+        if "minimum_payment" not in summary and summary["current_balance"] > 0:
+            summary["minimum_payment"] = max(25.0, round(summary["current_balance"] * 0.02, 2))
+            summary["minimum_payment_estimated"] = True
+
     return summary
 
 
@@ -194,13 +218,16 @@ def _summarize_amortization(df: pd.DataFrame) -> dict:
         if not interest.empty:
             summary["total_remaining_interest"] = round(float(interest.sum()), 2)
 
-    # Infer APR from first row if possible
     if "remaining_balance" in df.columns and "interest" in df.columns and len(df) > 0:
         try:
-            first_balance = float(pd.to_numeric(df["remaining_balance"], errors="coerce").dropna().iloc[0])
+            first_balance_after = float(pd.to_numeric(df["remaining_balance"], errors="coerce").dropna().iloc[0])
             first_interest = float(pd.to_numeric(df["interest"], errors="coerce").dropna().iloc[0])
-            if first_balance > 0:
-                monthly_rate = first_interest / first_balance
+            first_principal = 0.0
+            if "principal" in df.columns:
+                first_principal = float(pd.to_numeric(df["principal"], errors="coerce").dropna().iloc[0])
+            balance_at_accrual = first_balance_after + first_principal
+            if balance_at_accrual > 0:
+                monthly_rate = first_interest / balance_at_accrual
                 summary["implied_apr"] = round(monthly_rate * 12 * 100, 2)
         except Exception:
             pass

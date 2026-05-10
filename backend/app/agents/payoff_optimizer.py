@@ -34,14 +34,18 @@ logger = logging.getLogger(__name__)
 SYSTEM_PROMPT = """You are the Meridian Payoff Optimizer, a specialist agent that creates
 precise debt payoff plans.
 
-You will receive pre-computed amortization results from a math engine (not guesses).
+You receive pre-computed amortization results from a deterministic math engine. The debts list
+includes ALL liabilities (mortgages, student loans, auto loans, credit cards) extracted from
+doc_type="debt_statement", "amortization", and "credit_card_statement" documents. Do not skip
+or filter any debt — include every entry from the math engine output in your plan.
+
 Your job is to:
 1. Select the best strategy for this user (avalanche saves most interest; snowball provides
    motivational quick wins; hybrid when balances are close in size).
 2. Format the math engine output into a PayoffPlan JSON object.
 3. Write nothing — return only the JSON.
 
-All numbers come from the math engine.  DO NOT recalculate or adjust them.
+All numbers come from the math engine. DO NOT recalculate or adjust them.
 Return a single JSON object matching the PayoffPlan schema exactly.
 """
 
@@ -131,10 +135,9 @@ class PayoffOptimizer:
         extra_payment = float(user_data.get("extra_monthly_payment", 0))
         monthly_budget = monthly_minimum + extra_payment
 
-        # Ensure budget is at least the sum of minimums
-        if monthly_budget <= monthly_minimum:
-            # Add a sensible default extra payment (10% of minimums)
-            monthly_budget = monthly_minimum * 1.10
+        # Ensure budget is at least the sum of minimums (no extra invented)
+        if monthly_budget < monthly_minimum:
+            monthly_budget = monthly_minimum
 
         self._emit(
             "tool_call",
@@ -202,10 +205,13 @@ class PayoffOptimizer:
         ]
 
         last_error: Optional[Exception] = None
+        structured_chain = self.llm.with_structured_output(PayoffPlan)
         for attempt in range(1, 4):
             try:
-                structured_chain = self.llm.with_structured_output(PayoffPlan)
                 result = await structured_chain.ainvoke(messages)
+
+                if result is None:
+                    raise ValueError("LLM returned None — no structured output produced.")
 
                 if not isinstance(result, PayoffPlan):
                     result = PayoffPlan.model_validate(
@@ -215,7 +221,7 @@ class PayoffOptimizer:
                 self._emit("agent_complete", {"status": "success", "attempt": attempt})
                 return result
 
-            except (ValidationError, Exception) as exc:
+            except ValidationError as exc:
                 last_error = exc
                 logger.warning("PayoffOptimizer attempt %d failed: %s", attempt, str(exc)[:200])
                 if attempt < 3:
@@ -227,6 +233,10 @@ class PayoffOptimizer:
                             )
                         )
                     )
+            except Exception as exc:
+                last_error = exc
+                logger.warning("PayoffOptimizer attempt %d failed: %s", attempt, str(exc)[:200])
+                break
 
         # ------------------------------------------------------------------
         # 5. Hard fallback: build PayoffPlan directly from math engine output

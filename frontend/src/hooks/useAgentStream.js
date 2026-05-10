@@ -14,7 +14,7 @@ import { getSessionId } from '../lib/session.js';
  *   error          — Error|null
  *   clear          — () => void  resets the thread
  */
-export function useAgentStream() {
+export function useAgentStream(advisorScopeRef) {
   const [messages, setMessages] = useState([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [activeAgent, setActiveAgent] = useState(null);
@@ -82,10 +82,13 @@ export function useAgentStream() {
     // Append the user message we just sent
     const outboundMessages = [...historyBeforeThis, { role: 'user', content: text }];
 
+    const scope = advisorScopeRef?.current ?? null;
+
     try {
       await streamChat({
         messages: outboundMessages,
         sessionId,
+        ...(scope != null ? { context: { advisor_scope: scope } } : {}),
         onEvent: (event) => {
           if (controller.signal.aborted) return;
 

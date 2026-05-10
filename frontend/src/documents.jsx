@@ -1,6 +1,6 @@
 import React from 'react';
 import { I } from './icons.jsx';
-import { streamUpload } from './lib/api.js';
+import { streamUpload, listDocuments, deleteDocument } from './lib/api.js';
 import { getSessionId } from './lib/session.js';
 
 /* Documents / ingestion view */
@@ -27,125 +27,209 @@ const PIPELINE_STEPS = [
 
 const STAGE_INDEX = Object.fromEntries(PIPELINE_STEPS.map((s, i) => [s.key, i]));
 
-/**
- * Returns pipeline step state for each step index.
- * activeStep: 0-4 (index of the in-progress step), or -1 (idle), or 5 (done).
- */
 function getPipelineStatus(activeStep) {
   return PIPELINE_STEPS.map((p, i) => {
     if (activeStep < 0) return { ...p, status: "idle" };
-    if (i < activeStep) return { ...p, status: "active" };   // completed
-    if (i === activeStep) return { ...p, status: "running" }; // in progress
+    if (i < activeStep) return { ...p, status: "active" };
+    if (i === activeStep) return { ...p, status: "running" };
     return { ...p, status: "queued" };
   });
 }
 
-export function Documents({ online, onNav, uploadFile: apiUpload, uploading, uploadError, refresh }) {
+function sourceFromName(n) {
+  const s = n.toLowerCase();
+  if (s.includes("chase")) return "Chase";
+  if (s.includes("capital")) return "Capital One";
+  if (s.includes("wells")) return "Wells Fargo";
+  if (s.includes("sofi")) return "SoFi";
+  if (s.includes("schwab")) return "Schwab";
+  if (s.includes("honda")) return "Honda Financial";
+  return "Uploaded";
+}
+
+function formatSize(b) {
+  if (b < 1024) return b + " B";
+  if (b < 1024 * 1024) return Math.round(b / 1024) + " KB";
+  return (b / 1024 / 1024).toFixed(1) + " MB";
+}
+
+export function Documents({ online, onNav, uploadFile: apiUpload, uploading, uploadError, refresh, snapshotStatus, startPolling }) {
 
   const [drag, setDrag] = React.useState(false);
-  // `docs` tracks all uploads made in this session in-memory.
-  // There is no backend endpoint to list previously uploaded documents,
-  // so this list resets when the tab is closed.
   const [docs, setDocs] = React.useState([]);
-  const [activeStep, setActiveStep] = React.useState(-1); // -1 = idle
   const fileRef = React.useRef(null);
 
-  const ingestPipeline = getPipelineStatus(activeStep);
+  // stepByDoc: Map<docKey, number> — per-file pipeline step (-1=idle, 0-4=stage, 5=done)
+  const [stepByDoc, setStepByDoc] = React.useState({});
+  const [agentByDoc, setAgentByDoc] = React.useState({});
 
-  const sourceFromName = (n) => {
-    const s = n.toLowerCase();
-    if (s.includes("chase")) return "Chase";
-    if (s.includes("capital")) return "Capital One";
-    if (s.includes("wells")) return "Wells Fargo";
-    if (s.includes("sofi")) return "SoFi";
-    if (s.includes("schwab")) return "Schwab";
-    if (s.includes("honda")) return "Honda Financial";
-    return "Uploaded";
-  };
+  const sessionId = getSessionId();
 
-  const formatSize = (b) =>
-    b < 1024 ? b + " B"
-    : b < 1024 * 1024 ? Math.round(b / 1024) + " KB"
-    : (b / 1024 / 1024).toFixed(1) + " MB";
+  const loadDocs = React.useCallback(async () => {
+    try {
+      const data = await listDocuments(sessionId);
+      const today = new Date().toLocaleDateString(undefined, { month: "short", day: "numeric" });
+      const serverDocs = (data.documents ?? []).map((d) => ({
+        name: d.name,
+        size: formatSize(d.size ?? 0),
+        added: d.uploaded_at
+          ? new Date(d.uploaded_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })
+          : today,
+        status: 'ready',
+        rows: d.rows ?? 0,
+        source: sourceFromName(d.name),
+        table_name: d.table_name,
+        sha256: d.sha256,
+      }));
+      setDocs((prev) => {
+        const inFlight = prev.filter((d) => !d.sha256 && d._key);
+        const serverWithKeys = serverDocs.map((d) => {
+          const optimistic = prev.find((p) => p.sha256 === d.sha256);
+          return optimistic && optimistic._key ? { ...d, _key: optimistic._key } : d;
+        });
+        return [...inFlight, ...serverWithKeys];
+      });
+    } catch {
+      // backend offline — leave docs as-is
+    }
+  }, [sessionId]);
 
-  /* Track the current agent that's running during the analyze stage */
-  const [activeAgent, setActiveAgent] = React.useState(null);
+  React.useEffect(() => { loadDocs(); }, [loadDocs]);
+
+  // Derive the "most recent active step" across all in-flight uploads for the Pipeline panel.
+  const globalActiveStep = React.useMemo(() => {
+    const steps = Object.values(stepByDoc);
+    if (!steps.length) return -1;
+    const inFlight = steps.filter(s => s >= 0 && s < PIPELINE_STEPS.length);
+    if (!inFlight.length) return -1;
+    return Math.max(...inFlight);
+  }, [stepByDoc]);
+
+  const globalActiveAgent = React.useMemo(() => {
+    const agents = Object.values(agentByDoc).filter(Boolean);
+    return agents[agents.length - 1] ?? null;
+  }, [agentByDoc]);
+
+  const ingestPipeline = getPipelineStatus(globalActiveStep);
 
   const addFiles = async (fileList) => {
     if (!online) return;
     const files = Array.from(fileList || []);
     if (!files.length) return;
 
-    const today = new Date().toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    // Add optimistic in-progress rows immediately so the table shows each file.
+    const docKeys = files.map((f) => `${f.name}__${Date.now()}__${Math.random()}`);
 
-    for (const file of files) {
-      const doc = {
-        name: file.name,
-        size: formatSize(file.size),
-        added: today,
-        status: "parsing",
+    setDocs((prev) => {
+      const incoming = files.map((f, idx) => ({
+        name: f.name,
+        size: formatSize(f.size ?? 0),
+        added: new Date().toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+        status: 'parsing',
         rows: 0,
-        source: sourceFromName(file.name),
-      };
-      setDocs((cur) => [doc, ...cur]);
-      setActiveStep(0);
-      setActiveAgent(null);
+        source: sourceFromName(f.name),
+        table_name: null,
+        sha256: null,
+        _key: docKeys[idx],
+      }));
+      return [...incoming, ...prev];
+    });
+
+    setStepByDoc((prev) => {
+      const next = { ...prev };
+      docKeys.forEach((k) => { next[k] = 0; });
+      return next;
+    });
+
+    // Upload all files concurrently; errors are isolated per file.
+    await Promise.all(files.map(async (file, idx) => {
+      const docKey = docKeys[idx];
+
+      const updateStep = (step) =>
+        setStepByDoc((prev) => ({ ...prev, [docKey]: step }));
+
+      const updateStatus = (status) =>
+        setDocs((prev) => prev.map((d) => d._key === docKey ? { ...d, status } : d));
+
+      const updateAgent = (agent) =>
+        setAgentByDoc((prev) => ({ ...prev, [docKey]: agent }));
 
       try {
-        const sessionId = getSessionId();
         await streamUpload({
           file,
           sessionId,
           onEvent: (event) => {
             if (event.type === 'stage' && event.stage in STAGE_INDEX) {
-              setActiveStep(STAGE_INDEX[event.stage]);
-              if (event.stage !== 'analyze') setActiveAgent(null);
-            } else if (event.type === 'ingest_complete') {
-              setDocs((cur) =>
-                cur.map((d) =>
-                  d.name === doc.name && d.added === doc.added
-                    ? { ...d, rows: event.rows ?? d.rows, table_name: event.table_name, status: "indexing" }
-                    : d
-                )
-              );
+              updateStep(STAGE_INDEX[event.stage]);
+              const statusMap = { parse: 'parsing', normalize: 'normalizing', redact: 'redacting', index: 'indexing', analyze: 'indexing' };
+              if (statusMap[event.stage]) updateStatus(statusMap[event.stage]);
+              if (event.stage !== 'analyze') updateAgent(null);
             } else if (event.type === 'trace') {
               const agent = event.event?.agent;
               const t = event.event?.type;
-              if (agent && (t === 'agent_start' || t === 'tool_call')) {
-                setActiveAgent(agent);
-              }
+              if (agent && (t === 'agent_start' || t === 'tool_call')) updateAgent(agent);
+            } else if (event.type === 'ingest_complete') {
+              const doc = event.document || {};
+              setDocs((prev) => prev.map((d) => d._key === docKey ? {
+                ...d,
+                rows: doc.rows ?? event.rows ?? d.rows,
+                table_name: doc.table_name ?? event.table_name ?? d.table_name,
+                sha256: doc.sha256 ?? d.sha256,
+                size: doc.size != null ? formatSize(doc.size) : d.size,
+                status: 'ready',
+              } : d));
+              updateStep(PIPELINE_STEPS.length);
+              updateAgent(null);
+              loadDocs().catch(() => {});
+              startPolling?.();
+            } else if (event.type === 'snapshot_pending') {
+              startPolling?.();
             } else if (event.type === 'snapshot') {
-              setActiveStep(PIPELINE_STEPS.length); // all done
-              setActiveAgent(null);
-              setDocs((cur) =>
-                cur.map((d) =>
-                  d.name === doc.name && d.added === doc.added ? { ...d, status: "ready" } : d
-                )
-              );
-              // Tell parent to refresh its snapshot state
+              updateStep(PIPELINE_STEPS.length);
+              updateAgent(null);
+              updateStatus('ready');
+              loadDocs().catch(() => {});
               refresh().catch(() => {});
-            } else if (event.type === 'error') {
-              setDocs((cur) =>
-                cur.map((d) =>
-                  d.name === doc.name && d.added === doc.added ? { ...d, status: "error" } : d
-                )
-              );
             }
           },
         });
-      } catch (err) {
-        setActiveStep(-1);
-        setActiveAgent(null);
-        setDocs((cur) =>
-          cur.map((d) =>
-            d.name === doc.name && d.added === doc.added ? { ...d, status: "error" } : d
-          )
-        );
+        updateStatus('ready');
+      } catch {
+        updateStep(-1);
+        updateStatus('error');
+        updateAgent(null);
+      } finally {
+        loadDocs().catch(() => {});
       }
 
-      // Brief pause then reset
-      setTimeout(() => { setActiveStep(-1); setActiveAgent(null); }, 1200);
+      setTimeout(() => {
+        updateStep(-1);
+        updateAgent(null);
+        setStepByDoc((prev) => {
+          const next = { ...prev };
+          delete next[docKey];
+          return next;
+        });
+        setAgentByDoc((prev) => {
+          const next = { ...prev };
+          delete next[docKey];
+          return next;
+        });
+      }, 1200);
+    }));
+  };
+
+  const handleDelete = async (doc) => {
+    if (!doc.sha256) {
+      if (doc._key) setDocs((prev) => prev.filter((d) => d._key !== doc._key));
+      return;
     }
+    setDocs((prev) => prev.filter((d) => d.sha256 !== doc.sha256));
+    try {
+      await deleteDocument(sessionId, doc.sha256);
+    } catch { /* fall through — we'll reconcile via loadDocs */ }
+    await loadDocs();
+    refresh().catch(() => {});
   };
 
   const totalRows = docs.reduce((s, d) => s + (d.rows ?? 0), 0);
@@ -187,6 +271,10 @@ export function Documents({ online, onNav, uploadFile: apiUpload, uploading, upl
         </div>
       )}
 
+      <div style={{ fontSize: 12, color: "var(--ink-4)", marginBottom: 10, letterSpacing: "0.02em" }}>
+        One upload powers all 4 advisors.
+      </div>
+
       <div className="split-main">
         <div
           className={`dropzone ${drag ? "dragging" : ""} ${!online ? "disabled" : ""}`}
@@ -195,26 +283,22 @@ export function Documents({ online, onNav, uploadFile: apiUpload, uploading, upl
           onDragLeave={() => setDrag(false)}
           onDrop={(e) => { e.preventDefault(); setDrag(false); if (online) addFiles(e.dataTransfer.files); }}
           style={{
-            cursor: !online ? "not-allowed" : uploading ? "default" : "pointer",
-            opacity: !online || uploading ? 0.6 : 1,
+            cursor: !online ? "not-allowed" : "pointer",
+            opacity: !online ? 0.6 : 1,
           }}>
           <input ref={fileRef} type="file" multiple
             accept=".csv,.pdf,.ofx,.qfx,.tsv,.txt"
             onChange={(e) => { addFiles(e.target.files); e.target.value = ""; }}
             style={{ display: "none" }}
-            disabled={uploading || !online}/>
-          {uploading ? (
-            <span className="spinner" style={{ width: 28, height: 28, borderWidth: 2.5, borderColor: "var(--ink-3)", borderTopColor: "transparent" }}/>
-          ) : (
-            <I.upload className="icon" size={32} sw={1.25}/>
-          )}
+            disabled={!online}/>
+          <I.upload className="icon" size={32} sw={1.25}/>
           <div style={{ fontSize: 15, fontWeight: 500 }}>
-            {!online ? "Backend offline — uploads disabled" : uploading ? "Uploading…" : "Drop files or click to browse"}
+            {!online ? "Backend offline — uploads disabled" : "Drop files or click to browse"}
           </div>
           <div className="muted" style={{ fontSize: 12.5, maxWidth: 380 }}>
             Supported: CSV, OFX, QFX, PDF statements from Chase, Wells Fargo, Capital One, SoFi, Schwab, and 60+ others.
           </div>
-          {online && !uploading && (
+          {online && (
             <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
               <button className="btn primary" onClick={(e) => { e.stopPropagation(); fileRef.current?.click(); }}><I.upload size={13}/> Choose files</button>
             </div>
@@ -244,8 +328,8 @@ export function Documents({ online, onNav, uploadFile: apiUpload, uploading, upl
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 13, fontWeight: 500 }}>{p.step}</div>
                   <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
-                    {p.key === "analyze" && p.status === "running" && activeAgent
-                      ? <>Running <strong style={{ color: "var(--info)" }}>{activeAgent.replace(/_/g, ' ')}</strong> …</>
+                    {p.key === "analyze" && p.status === "running" && globalActiveAgent
+                      ? <>Running <strong style={{ color: "var(--info)" }}>{globalActiveAgent.replace(/_/g, ' ')}</strong> …</>
                       : p.desc}
                   </div>
                 </div>
@@ -299,13 +383,27 @@ export function Documents({ online, onNav, uploadFile: apiUpload, uploading, upl
             <div className="card-sub">
               {docs.length > 0
                 ? `${totalRows.toLocaleString()} rows indexed across ${uniqueSources} source${uniqueSources !== 1 ? "s" : ""}`
-                : "No documents uploaded this session"}
+                : "Documents persist across sessions"}
             </div>
           </div>
           <div style={{ display: "flex", gap: 6 }}>
             <button className="btn ghost" style={{ fontSize: 12 }}><I.filter size={12}/> Filter</button>
           </div>
         </div>
+
+        {snapshotStatus === "computing" && (
+          <div style={{
+            marginBottom: 12, padding: "8px 12px",
+            borderRadius: 8, background: "var(--info-tint)",
+            border: "1px solid var(--info)",
+            fontSize: 12.5, color: "var(--ink-2)",
+            display: "flex", gap: 8, alignItems: "center",
+          }}>
+            <span className="spinner" style={{ width: 11, height: 11, borderColor: "var(--info)", borderTopColor: "transparent", flexShrink: 0 }}/>
+            Advisors re-analyzing your data… (this takes ~30s)
+          </div>
+        )}
+
         <table className="table documents-table">
           <thead>
             <tr>
@@ -334,7 +432,7 @@ export function Documents({ online, onNav, uploadFile: apiUpload, uploading, upl
               </tr>
             ) : (
               docs.map((d, i) => (
-                <tr key={i}>
+                <tr key={d._key ?? d.sha256 ?? i}>
                   <td>
                     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                       <div style={{
@@ -354,7 +452,16 @@ export function Documents({ online, onNav, uploadFile: apiUpload, uploading, upl
                   <td className="col-rows num tnum" style={{ fontSize: 13.5 }}>{d.rows.toLocaleString()}</td>
                   <td className="col-size muted" style={{ fontSize: 12 }}>{d.size}</td>
                   <td><StatusPill status={d.status}/></td>
-                  <td><button className="icon-btn" style={{ width: 26, height: 26 }}><I.more size={14}/></button></td>
+                  <td>
+                    <button
+                      className="icon-btn"
+                      style={{ width: 26, height: 26 }}
+                      title="Delete document"
+                      onClick={() => handleDelete(d)}
+                    >
+                      <I.x size={13}/>
+                    </button>
+                  </td>
                 </tr>
               ))
             )}

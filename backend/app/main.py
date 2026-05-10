@@ -10,6 +10,7 @@ Endpoints:
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -69,6 +70,12 @@ app.add_middleware(
 # In-memory cache backed by per-session JSON files in DATA_DIR so state survives restarts.
 _sessions: dict[str, dict] = {}
 
+# session_id -> running asyncio.Task for background snapshot generation
+_snapshot_tasks: dict[str, asyncio.Task] = {}
+
+# session_id -> number of upload event streams currently executing ingest
+_active_uploads: dict[str, int] = {}
+
 # LangGraph graph singleton (lazy init to avoid startup overhead when LLM key is missing)
 _graph: Optional[object] = None
 
@@ -99,6 +106,7 @@ def _persist_session(session_id: str) -> None:
         "snapshot": json.loads(snap.model_dump_json()) if isinstance(snap, Snapshot) else None,
         "financial_data": sess.get("financial_data", {}),
         "table_name": sess.get("table_name"),
+        "documents": sess.get("documents", []),
     }
     path = _session_state_path(session_id)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -121,6 +129,7 @@ def _load_session(session_id: str) -> Optional[dict]:
             "snapshot": snapshot,
             "financial_data": payload.get("financial_data", {}),
             "table_name": payload.get("table_name"),
+            "documents": payload.get("documents", []),
         }
         _sessions[session_id] = sess
         return sess
@@ -141,18 +150,59 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+async def _background_snapshot_task(session_id: str) -> None:
+    """Debounced background snapshot: waits 2s, then waits for all in-flight
+    uploads to finish, then runs run_full_snapshot once."""
+    try:
+        await asyncio.sleep(2)
+        waited = 0.0
+        while _active_uploads.get(session_id, 0) > 0 and waited < 30:
+            await asyncio.sleep(0.5)
+            waited += 0.5
+        sess = _sessions.get(session_id)
+        if not sess:
+            return
+        merged = sess.get("financial_data", {})
+        try:
+            snapshot = await run_full_snapshot(
+                graph=_get_graph(),
+                user_data=merged,
+                session_id=session_id,
+            )
+        except Exception:
+            logger.exception("Background snapshot failed for session %s", session_id)
+            snapshot = Snapshot(generated_at=_now_iso())
+        _sessions[session_id]["snapshot"] = snapshot
+        _persist_session(session_id)
+        logger.info("Background snapshot complete for session %s", session_id)
+    except asyncio.CancelledError:
+        logger.debug("Snapshot task cancelled for session %s", session_id)
+    finally:
+        _snapshot_tasks.pop(session_id, None)
+
+
+def _schedule_snapshot(session_id: str) -> None:
+    """Cancel any pending snapshot task and schedule a fresh one."""
+    existing = _snapshot_tasks.get(session_id)
+    if existing and not existing.done():
+        existing.cancel()
+    task = asyncio.create_task(_background_snapshot_task(session_id))
+    _snapshot_tasks[session_id] = task
+
+
 # ---------------------------------------------------------------------------
 # POST /api/upload
 # ---------------------------------------------------------------------------
 
 
-def _save_raw_upload(session_id: str, filename: str, content: bytes) -> Path:
-    """Save the raw uploaded file under data/{session_id}/uploads/{filename}."""
-    safe_name = Path(filename).name  # strip any path components
+def _save_raw_upload(session_id: str, filename: str, content: bytes) -> tuple[Path, str]:
+    """Save the raw uploaded file and return (path, sha256_hex)."""
+    safe_name = Path(filename).name
     target = Path(settings.data_dir) / session_id / "uploads" / safe_name
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(content)
-    return target
+    sha256 = hashlib.sha256(content).hexdigest()
+    return target, sha256
 
 
 async def _upload_event_stream(
@@ -160,114 +210,115 @@ async def _upload_event_stream(
     filename: str,
     session_id: str,
 ) -> AsyncGenerator[str, None]:
-    """SSE generator: streams ingestion stages, then live agent trace events."""
-    from app.agents.graph import trace_queue_var
-
+    """SSE generator: streams ingestion stages then closes; snapshot runs in background."""
     def _sse(data: dict) -> str:
         return f"data: {json.dumps(data, default=str)}\n\n"
 
-    # Stage 1 — parse
-    yield _sse({"type": "stage", "stage": "parse", "label": "Parsing document"})
+    _active_uploads[session_id] = _active_uploads.get(session_id, 0) + 1
     try:
-        df = await parse_document(file_content, filename)
-    except Exception as exc:
-        logger.exception("Parse failed: %s", filename)
-        yield _sse({"type": "error", "stage": "parse", "message": str(exc)})
-        yield _sse({"type": "done"})
-        return
-
-    if df.empty:
-        yield _sse({"type": "error", "stage": "parse", "message": "Document is empty"})
-        yield _sse({"type": "done"})
-        return
-
-    # Stage 2 — normalize (parser already snake_cased columns; emit stage for UI)
-    yield _sse({"type": "stage", "stage": "normalize", "label": "Normalizing columns"})
-    await asyncio.sleep(0)  # let event flush
-
-    # Stage 3 — redact / anonymize
-    yield _sse({"type": "stage", "stage": "redact", "label": "Anonymizing PII"})
-    financial_summary = anonymize_for_llm(df)
-    financial_summary["source_filename"] = filename
-
-    # Save raw file alongside structured data
-    raw_path = _save_raw_upload(session_id, filename, file_content)
-
-    # Stage 4 — index into per-session SQLite
-    yield _sse({"type": "stage", "stage": "index", "label": "Indexing into SQLite"})
-    db_path = _session_db(session_id)
-    table_name = Path(filename).stem.replace(" ", "_").replace("-", "_").lower()
-    try:
-        rag = TabularRAG(db_path=db_path, llm=get_llm())
-        rag.ingest(df, table_name)
-    except Exception as exc:
-        logger.error("TabularRAG ingest failed: %s", exc)
-
-    # Merge into session financial data
-    if session_id not in _sessions:
-        if _load_session(session_id) is None:
-            _sessions[session_id] = {"snapshot": None, "financial_data": {}, "table_name": None}
-
-    existing = _sessions[session_id].get("financial_data", {})
-    if existing:
-        merged = {**existing, f"doc_{table_name}": financial_summary}
-    else:
-        merged = financial_summary
-    _sessions[session_id]["financial_data"] = merged
-    _sessions[session_id]["table_name"] = table_name
-
-    # Emit ingest_complete with metadata
-    yield _sse({
-        "type": "ingest_complete",
-        "rows": int(len(df)),
-        "columns": list(df.columns),
-        "table_name": table_name,
-        "raw_path": str(raw_path.relative_to(Path.cwd())) if raw_path.is_relative_to(Path.cwd()) else str(raw_path),
-        "session_id": session_id,
-    })
-
-    # Stage 5 — analyze (run LangGraph with live trace streaming)
-    yield _sse({"type": "stage", "stage": "analyze", "label": "Running advisor agents"})
-
-    # Set up streaming trace queue and run snapshot in a background task
-    queue: asyncio.Queue = asyncio.Queue()
-    token = trace_queue_var.set(queue)
-    snapshot: Optional[Snapshot] = None
-
-    async def _run_snapshot() -> None:
-        nonlocal snapshot
+        # Stage 1 — parse
+        yield _sse({"type": "stage", "stage": "parse", "label": "Parsing document"})
         try:
-            snapshot = await run_full_snapshot(
-                graph=_get_graph(),
-                user_data=merged,
-                session_id=session_id,
-            )
+            df = await parse_document(file_content, filename)
         except Exception as exc:
-            logger.exception("Snapshot generation failed")
-            snapshot = Snapshot(generated_at=_now_iso())
-        finally:
-            await queue.put(None)  # sentinel
+            logger.exception("Parse failed: %s", filename)
+            yield _sse({"type": "error", "stage": "parse", "message": str(exc)})
+            yield _sse({"type": "done"})
+            return
 
-    snapshot_task = asyncio.create_task(_run_snapshot())
+        if df.empty:
+            yield _sse({"type": "error", "stage": "parse", "message": "Document is empty"})
+            yield _sse({"type": "done"})
+            return
 
-    try:
-        # Drain trace events until the sentinel arrives
-        while True:
-            event = await queue.get()
-            if event is None:
-                break
-            yield _sse({"type": "trace", "event": json.loads(event.model_dump_json())})
+        # Stage 2 — normalize (parser already snake_cased columns; emit stage for UI)
+        yield _sse({"type": "stage", "stage": "normalize", "label": "Normalizing columns"})
+        await asyncio.sleep(0)  # let event flush
 
-        await snapshot_task  # ensure done
+        # Stage 3 — redact / anonymize
+        yield _sse({"type": "stage", "stage": "redact", "label": "Anonymizing PII"})
+        financial_summary = anonymize_for_llm(df)
+        financial_summary["source_filename"] = filename
 
-        if snapshot is not None:
-            _sessions[session_id]["snapshot"] = snapshot
-            _persist_session(session_id)
-            yield _sse({"type": "snapshot", "snapshot": json.loads(snapshot.model_dump_json())})
+        # Compute sha256 before saving so we can dedupe
+        sha256 = hashlib.sha256(file_content).hexdigest()
+
+        # Ensure session exists in memory
+        if session_id not in _sessions:
+            if _load_session(session_id) is None:
+                _sessions[session_id] = {"snapshot": None, "financial_data": {}, "table_name": None, "documents": []}
+
+        if "documents" not in _sessions[session_id]:
+            _sessions[session_id]["documents"] = []
+
+        existing_docs: list[dict] = _sessions[session_id]["documents"]
+        duplicate = next((d for d in existing_docs if d["sha256"] == sha256), None)
+        if duplicate is not None:
+            yield _sse({
+                "type": "ingest_complete",
+                "deduped": True,
+                "rows": duplicate["rows"],
+                "columns": duplicate["columns"],
+                "table_name": duplicate["table_name"],
+                "session_id": session_id,
+                "document": duplicate,
+            })
+            yield _sse({"type": "done"})
+            return
+
+        # Save raw file alongside structured data
+        raw_path, _ = _save_raw_upload(session_id, filename, file_content)
+
+        # Stage 4 — index into per-session SQLite
+        yield _sse({"type": "stage", "stage": "index", "label": "Indexing into SQLite"})
+        db_path = _session_db(session_id)
+        table_name = Path(filename).stem.replace(" ", "_").replace("-", "_").lower()
+        try:
+            rag = TabularRAG(db_path=db_path, llm=get_llm())
+            rag.ingest(df, table_name)
+        except Exception as exc:
+            logger.error("TabularRAG ingest failed: %s", exc)
+
+        existing = _sessions[session_id].get("financial_data", {})
+        merged = {**existing, f"doc_{table_name}": financial_summary}
+        _sessions[session_id]["financial_data"] = merged
+        _sessions[session_id]["table_name"] = table_name
+
+        # Record the document entry
+        doc_entry: dict = {
+            "sha256": sha256,
+            "name": Path(filename).name,
+            "size": len(file_content),
+            "table_name": table_name,
+            "rows": int(len(df)),
+            "columns": list(df.columns),
+            "uploaded_at": _now_iso(),
+        }
+        _sessions[session_id]["documents"].append(doc_entry)
+
+        # Persist the ingest result immediately so the session survives a process restart
+        # before the background snapshot task has a chance to call _persist_session itself.
+        _persist_session(session_id)
+
+        # Emit ingest_complete with metadata
+        yield _sse({
+            "type": "ingest_complete",
+            "deduped": False,
+            "rows": int(len(df)),
+            "columns": list(df.columns),
+            "table_name": table_name,
+            "raw_path": str(raw_path.relative_to(Path.cwd())) if raw_path.is_relative_to(Path.cwd()) else str(raw_path),
+            "session_id": session_id,
+            "document": doc_entry,
+        })
+
+        _schedule_snapshot(session_id)
+        yield _sse({"type": "snapshot_pending", "session_id": session_id})
+        yield _sse({"type": "done"})
     finally:
-        trace_queue_var.reset(token)
-
-    yield _sse({"type": "done"})
+        _active_uploads[session_id] = max(0, _active_uploads.get(session_id, 1) - 1)
+        if _active_uploads[session_id] == 0:
+            _active_uploads.pop(session_id, None)
 
 
 @app.post("/api/upload")
@@ -312,7 +363,7 @@ async def _legacy_upload_response(content: bytes, filename: str, session_id: str
 
     financial_summary = anonymize_for_llm(df)
     financial_summary["source_filename"] = filename
-    _save_raw_upload(session_id, filename, content)
+    _save_raw_upload(session_id, filename, content)  # return value unused in legacy path
 
     table_name = Path(filename).stem.replace(" ", "_").replace("-", "_").lower()
     try:
@@ -324,7 +375,7 @@ async def _legacy_upload_response(content: bytes, filename: str, session_id: str
         if _load_session(session_id) is None:
             _sessions[session_id] = {"snapshot": None, "financial_data": {}, "table_name": None}
     existing = _sessions[session_id].get("financial_data", {})
-    merged = {**existing, f"doc_{table_name}": financial_summary} if existing else financial_summary
+    merged = {**existing, f"doc_{table_name}": financial_summary}
     _sessions[session_id]["financial_data"] = merged
     _sessions[session_id]["table_name"] = table_name
 
@@ -383,27 +434,63 @@ async def _stream_chat(request: ChatRequest) -> AsyncGenerator[str, None]:
         for msg in request.messages
     ]
 
-    # Merge in any context provided by the client
+    # Pull advisor_scope from context (meta, not financial data) before merging
+    advisor_scope = None
     if request.context:
-        financial_data = {**financial_data, **request.context}
+        context_copy = dict(request.context)
+        advisor_scope = context_copy.pop("advisor_scope", None)
+        if context_copy:
+            financial_data = {**financial_data, **context_copy}
 
     from app.agents.graph import AdvisorState
+    from app.agents.fast_path import try_fast_answer
+
+    cached_snapshot = sess.get("snapshot") if sess else None
+
+    last_user_text = next(
+        (m.content for m in reversed(request.messages) if m.role == "user"),
+        "",
+    )
+    fast = try_fast_answer(last_user_text, cached_snapshot, advisor_scope)
+    if fast is not None:
+        answer, agent_label = fast
+        trace_event = TraceEvent(
+            type="agent_complete",
+            agent=agent_label,
+            payload={"path": "fast_path", "matched": True},
+            timestamp=_now_iso(),
+        )
+        yield _sse({"type": "trace", "event": json.loads(trace_event.model_dump_json())})
+        chat_msg = ChatMessage(role="assistant", content=answer, agent=agent_label)
+        yield _sse({"type": "message", "message": json.loads(chat_msg.model_dump_json())})
+        yield _sse({"type": "done"})
+        return
+
+    scope_to_intent = {
+        "debt": "debt_analysis",
+        "budget": "budget_advice",
+        "savings": "savings_strategy",
+        "payoff": "payoff_plan",
+    }
+
+    if advisor_scope and advisor_scope in scope_to_intent:
+        resolved_intent = scope_to_intent[advisor_scope]
+    elif cached_snapshot is not None:
+        resolved_intent = "general_chat"
+    else:
+        resolved_intent = "full_snapshot"
 
     initial_state: AdvisorState = {
         "messages": messages_for_graph,
         "user_financial_data": financial_data,
-        "debt_analysis": _sessions.get(session_id, {}).get("snapshot") and
-                         getattr(_sessions[session_id].get("snapshot"), "debt_analysis", None),
-        "budget_advice": _sessions.get(session_id, {}).get("snapshot") and
-                         getattr(_sessions[session_id].get("snapshot"), "budget_advice", None),
-        "savings_strategy": _sessions.get(session_id, {}).get("snapshot") and
-                            getattr(_sessions[session_id].get("snapshot"), "savings_strategy", None),
-        "payoff_plan": _sessions.get(session_id, {}).get("snapshot") and
-                       getattr(_sessions[session_id].get("snapshot"), "payoff_plan", None),
+        "debt_analysis": getattr(cached_snapshot, "debt_analysis", None) if cached_snapshot else None,
+        "budget_advice": getattr(cached_snapshot, "budget_advice", None) if cached_snapshot else None,
+        "savings_strategy": getattr(cached_snapshot, "savings_strategy", None) if cached_snapshot else None,
+        "payoff_plan": getattr(cached_snapshot, "payoff_plan", None) if cached_snapshot else None,
         "current_agent": "supervisor",
         "needs_clarification": False,
         "clarification_question": None,
-        "intent": "full_snapshot",
+        "intent": resolved_intent,
         "agents_completed": [],
         "trace": [],
     }
@@ -426,9 +513,9 @@ async def _stream_chat(request: ChatRequest) -> AsyncGenerator[str, None]:
             elif isinstance(event, dict):
                 yield _sse({"type": "trace", "event": event})
 
-        # Emit the assistant message
         all_messages = final_state.get("messages", [])
-        for msg in all_messages:
+        new_messages = all_messages[len(messages_for_graph):]
+        for msg in new_messages:
             if isinstance(msg, dict):
                 role = msg.get("role")
                 content = msg.get("content", "")
@@ -507,6 +594,91 @@ async def chat(request: ChatRequest) -> StreamingResponse:
 
 
 # ---------------------------------------------------------------------------
+# GET /api/documents/{session_id}
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/documents/{session_id}")
+async def list_documents(session_id: str) -> JSONResponse:
+    """Return the list of uploaded documents for a session."""
+    sess = _get_session(session_id)
+    documents = sess.get("documents", []) if sess else []
+    return JSONResponse({"documents": documents})
+
+
+# ---------------------------------------------------------------------------
+# DELETE /api/documents/{session_id}/{sha256}
+# ---------------------------------------------------------------------------
+
+
+@app.delete("/api/documents/{session_id}/{sha256}")
+async def delete_document(session_id: str, sha256: str) -> JSONResponse:
+    """Remove a document and all its on-disk artifacts: raw file, SQLite table,
+    in-memory financial_data entry, and the per-session DB if it becomes empty."""
+    sess = _get_session(session_id)
+    if not sess:
+        return JSONResponse({"deleted": False})
+
+    docs: list[dict] = sess.get("documents", [])
+    target = next((d for d in docs if d["sha256"] == sha256), None)
+    if target is None:
+        return JSONResponse({"deleted": False})
+
+    sess["documents"] = [d for d in docs if d["sha256"] != sha256]
+
+    raw_path = Path(settings.data_dir) / session_id / "uploads" / target["name"]
+    if raw_path.exists():
+        try:
+            raw_path.unlink()
+        except Exception as exc:
+            logger.warning("Could not delete raw file %s: %s", raw_path, exc)
+
+    table_name = target.get("table_name")
+    if table_name:
+        sess.get("financial_data", {}).pop(f"doc_{table_name}", None)
+        db_path = Path(_session_db(session_id))
+        if db_path.exists():
+            try:
+                with sqlite3.connect(str(db_path)) as conn:
+                    conn.execute(f'DROP TABLE IF EXISTS "{table_name}"')
+                    conn.commit()
+            except Exception as exc:
+                logger.warning("Could not drop SQLite table %s: %s", table_name, exc)
+
+    if not sess["documents"]:
+        sess["snapshot"] = None
+        sess["financial_data"] = {}
+        sess["table_name"] = None
+        pending = _snapshot_tasks.pop(session_id, None)
+        if pending and not pending.done():
+            pending.cancel()
+
+        db_path = Path(_session_db(session_id))
+        if db_path.exists():
+            try:
+                db_path.unlink()
+            except Exception as exc:
+                logger.warning("Could not delete session DB %s: %s", db_path, exc)
+
+        uploads_dir = Path(settings.data_dir) / session_id / "uploads"
+        if uploads_dir.exists():
+            try:
+                for child in uploads_dir.iterdir():
+                    child.unlink()
+                uploads_dir.rmdir()
+                parent = uploads_dir.parent
+                if parent.exists() and not any(parent.iterdir()):
+                    parent.rmdir()
+            except Exception as exc:
+                logger.warning("Could not clean uploads dir %s: %s", uploads_dir, exc)
+    else:
+        _schedule_snapshot(session_id)
+
+    _persist_session(session_id)
+    return JSONResponse({"deleted": True})
+
+
+# ---------------------------------------------------------------------------
 # GET /api/snapshot/{session_id}
 # ---------------------------------------------------------------------------
 
@@ -526,6 +698,44 @@ async def get_snapshot(session_id: str) -> JSONResponse:
 
 
 # ---------------------------------------------------------------------------
+# GET /api/snapshot-status/{session_id}
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/snapshot-status/{session_id}")
+async def snapshot_status(session_id: str) -> JSONResponse:
+    """Return the current snapshot generation status for a session.
+
+    Response shapes:
+        {"status": "computing", "generated_at": null}
+        {"status": "ready",     "generated_at": "<iso>"}
+        {"status": "stale",     "generated_at": "<iso>"}
+        {"status": "none",      "generated_at": null}
+    """
+    session = _get_session(session_id)
+    snapshot: Optional[Snapshot] = session.get("snapshot") if session else None
+    generated_at = snapshot.generated_at if snapshot else None
+
+    task = _snapshot_tasks.get(session_id)
+    is_task_running = task is not None and not task.done()
+
+    has_docs = bool(session and session.get("documents"))
+
+    if _active_uploads.get(session_id, 0) > 0:
+        status = "computing"
+    elif is_task_running:
+        status = "computing"
+    elif snapshot is not None:
+        status = "ready"
+    elif has_docs:
+        status = "stale"
+    else:
+        status = "none"
+
+    return JSONResponse({"status": status, "generated_at": generated_at})
+
+
+# ---------------------------------------------------------------------------
 # DELETE /api/data/{session_id}
 # ---------------------------------------------------------------------------
 
@@ -533,6 +743,11 @@ async def get_snapshot(session_id: str) -> JSONResponse:
 @app.delete("/api/data/{session_id}")
 async def delete_session_data(session_id: str) -> JSONResponse:
     """Drop all data for a session (SQLite tables + LangGraph checkpoints)."""
+
+    # Cancel any pending snapshot task
+    task = _snapshot_tasks.pop(session_id, None)
+    if task and not task.done():
+        task.cancel()
 
     # Remove from in-memory store
     removed = _sessions.pop(session_id, None)

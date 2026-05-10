@@ -95,6 +95,31 @@ export async function getSnapshot(sessionId, signal) {
   return res.json();
 }
 
+/* GET /api/snapshot-status/:session_id → { status: "ready"|"computing"|"stale"|"none", generated_at: str|null } */
+export async function getSnapshotStatus(sessionId, signal) {
+  const res = await fetch(`${BASE}/api/snapshot-status/${encodeURIComponent(sessionId)}`, { signal });
+  if (res.status === 404) return { status: 'none', generated_at: null };
+  if (!res.ok) throw new Error(`snapshot-status failed: ${res.status}`);
+  return res.json();
+}
+
+/* GET /api/documents/:session_id → { documents: [...] } or 404 → { documents: [] } */
+export async function listDocuments(sessionId) {
+  const res = await fetch(`${BASE}/api/documents/${encodeURIComponent(sessionId)}`);
+  if (res.status === 404) return { documents: [] };
+  if (!res.ok) throw new Error(`listDocuments failed: ${res.status}`);
+  return res.json();
+}
+
+/* DELETE /api/documents/:session_id/:sha256 → 204 */
+export async function deleteDocument(sessionId, sha256) {
+  const res = await fetch(
+    `${BASE}/api/documents/${encodeURIComponent(sessionId)}/${encodeURIComponent(sha256)}`,
+    { method: 'DELETE' }
+  );
+  if (res.status !== 204 && !res.ok) throw new Error(`deleteDocument failed: ${res.status}`);
+}
+
 /* DELETE /api/data/:session_id → 204 */
 export async function deleteData(sessionId) {
   const res = await fetch(`${BASE}/api/data/${encodeURIComponent(sessionId)}`, { method: 'DELETE' });

@@ -16,7 +16,7 @@ from typing import Any
 def _build_llm(model: str, api_key: str | None) -> Any:
     try:
         from langchain_openrouter import ChatOpenRouter  # type: ignore[import]
-        return ChatOpenRouter(model=model, api_key=api_key, temperature=0.1)
+        return ChatOpenRouter(model=model, api_key=api_key, temperature=0.1, max_tokens=2000)
     except ImportError:
         from langchain_openai import ChatOpenAI  # type: ignore[import]
         return ChatOpenAI(
@@ -24,6 +24,7 @@ def _build_llm(model: str, api_key: str | None) -> Any:
             api_key=api_key,
             base_url="https://openrouter.ai/api/v1",
             temperature=0.1,
+            max_tokens=2000,
         )
 
 

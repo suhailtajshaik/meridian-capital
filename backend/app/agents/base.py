@@ -114,7 +114,8 @@ class SelfCorrectingAgent:
     # Public interface
     # ------------------------------------------------------------------
 
-    async def run(self, user_data: dict, chat_history: list) -> BaseModel:
+    async def run(self, user_data: dict, chat_history: list) -> BaseModel:  # noqa: D401
+        attempts_used = 0
         """Run the agent and return a validated Pydantic model.
 
         Args:
@@ -134,6 +135,7 @@ class SelfCorrectingAgent:
         last_error: Optional[Exception] = None
 
         for attempt in range(1, MAX_RETRIES + 1):
+            attempts_used = attempt
             try:
                 self._emit(
                     "tool_call",
@@ -156,31 +158,42 @@ class SelfCorrectingAgent:
                 self._emit("agent_complete", {"status": "success", "attempt": attempt})
                 return result
 
-            except (ValidationError, Exception) as exc:
+            except ValidationError as exc:
                 last_error = exc
                 error_msg = str(exc)
                 logger.warning(
-                    "Agent %s attempt %d failed: %s",
+                    "Agent %s attempt %d validation failed: %s",
                     self.name,
                     attempt,
                     error_msg[:200],
                 )
                 self._emit(
                     "tool_result",
-                    {"attempt": attempt, "status": "error", "error": error_msg[:500]},
+                    {"attempt": attempt, "status": "validation_error", "error": error_msg[:500]},
                 )
-
                 if attempt < MAX_RETRIES:
-                    # Ask the LLM to fix the error on the next turn
                     correction_prompt = (
                         f"Your previous response had a validation error: {error_msg}\n\n"
                         f"Please fix the response so it conforms exactly to the required schema. "
                         f"Return only the corrected JSON object."
                     )
                     messages.append(HumanMessage(content=correction_prompt))
+            except Exception as exc:
+                last_error = exc
+                error_msg = str(exc)
+                logger.warning(
+                    "Agent %s aborted (non-recoverable): %s",
+                    self.name,
+                    error_msg[:200],
+                )
+                self._emit(
+                    "tool_result",
+                    {"attempt": attempt, "status": "fatal_error", "error": error_msg[:500]},
+                )
+                break
 
-        self._emit("agent_complete", {"status": "failed", "attempts": MAX_RETRIES})
+        self._emit("agent_complete", {"status": "failed", "attempts": attempts_used})
         raise ValueError(
-            f"Agent {self.name} failed after {MAX_RETRIES} attempts. "
+            f"Agent {self.name} failed after {attempts_used} attempt(s). "
             f"Last error: {last_error}"
         )

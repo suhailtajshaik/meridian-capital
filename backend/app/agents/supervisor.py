@@ -32,6 +32,29 @@ VALID_INTENTS = {
     "general_chat",
 }
 
+# Deterministic keyword → intent map. Match before invoking the LLM to avoid
+# a 1-2s classification round-trip for unambiguous questions.
+_INTENT_RULES: list[tuple[str, str]] = [
+    (r"\b(debt[-\s]?free|payoff|pay\s+off|amortization|snowball|avalanche|interest\s+saved|months?\s+to\s+payoff)\b", "payoff_plan"),
+    (r"\b(emergency\s+fund|runway|months?\s+of\s+expenses|savings?\s+(goal|plan|strategy)|nest\s+egg|hys?a)\b", "savings_strategy"),
+    (r"\b(budget|spending|expenses?|categor(y|ies)|over[-\s]?spend|cut\s+spending|50/30/20|where.*(money|spend))\b", "budget_advice"),
+    (r"\b(debt|owe|liabilit(y|ies)|apr|interest\s+rate|credit\s+card|loan|mortgage|balance|highest[-\s]?rate)\b", "debt_analysis"),
+    (r"\b(snapshot|overview|full\s+picture|big\s+picture|everything|all\s+of\s+(it|my))\b", "full_snapshot"),
+    (r"^\s*(hi|hey|hello|thanks|thank\s+you|ok|okay|cool|got\s+it)\s*[!?\.]?\s*$", "general_chat"),
+]
+
+
+def _rule_based_intent(text: str) -> Optional[str]:
+    """Return an intent if a deterministic rule matches; else None."""
+    if not text:
+        return None
+    lowered = text.lower().strip()
+    import re
+    for pattern, intent in _INTENT_RULES:
+        if re.search(pattern, lowered):
+            return intent
+    return None
+
 SUPERVISOR_SYSTEM_PROMPT = """You are the Meridian supervisor agent.  Your only job is to
 classify the user's intent into exactly one of these categories and return a JSON object.
 
@@ -92,7 +115,27 @@ class Supervisor:
         """
         self._emit("agent_start", {"has_financial_data": has_financial_data})
 
-        # Build a summary of the conversation for classification
+        last_user_text = ""
+        for m in reversed(messages):
+            role = m.get("role") if isinstance(m, dict) else getattr(m, "role", None)
+            content = m.get("content", "") if isinstance(m, dict) else getattr(m, "content", "")
+            if role == "user" and content:
+                last_user_text = content
+                break
+
+        rule_intent = _rule_based_intent(last_user_text)
+        if rule_intent is not None:
+            self._emit(
+                "agent_complete",
+                {"intent": rule_intent, "path": "rule_based", "reasoning": "keyword match"},
+            )
+            return {
+                "intent": rule_intent,
+                "reasoning": "Deterministic keyword match — skipped LLM classification.",
+                "needs_clarification": False,
+                "clarification_question": None,
+            }
+
         conversation_text = "\n".join(
             f"{m.get('role', 'user') if isinstance(m, dict) else getattr(m, 'role', 'user')}: "
             f"{m.get('content', '') if isinstance(m, dict) else getattr(m, 'content', '')}"

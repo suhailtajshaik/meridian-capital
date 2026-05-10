@@ -615,6 +615,18 @@ input, textarea { font: inherit; color: inherit; }
 .fade-in { animation: fadeIn 240ms ease both; }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 
+/* ---------- Skeleton / shimmer ---------- */
+.skeleton {
+  background: linear-gradient(90deg, var(--surface-2) 0%, var(--surface) 50%, var(--surface-2) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+  border-radius: 4px;
+}
+@keyframes shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
 /* Scrollbar */
 .scroll::-webkit-scrollbar, .chat-stream::-webkit-scrollbar { width: 10px; }
 .scroll::-webkit-scrollbar-thumb, .chat-stream::-webkit-scrollbar-thumb {

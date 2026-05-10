@@ -53,7 +53,7 @@ export function Sidebar({ active, onNav }) {
         <div style={{ flex: 1, minWidth: 0 }}>
           <div className="user-name">Your account</div>
           <div className="user-meta">
-            <I.lock size={10}/> Local vault · on-device
+            <I.lock size={10}/> Session-scoped · PII redacted
           </div>
         </div>
       </div>

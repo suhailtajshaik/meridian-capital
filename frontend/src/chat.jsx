@@ -5,6 +5,380 @@ import { useAgentStream } from './hooks/useAgentStream.js';
 
 /* Chat panel — supervisor + sub-agent threading, agent attribution chips */
 
+/* ─── DSL block components ───────────────────────────────────────────────── */
+
+const TONE_COLORS = {
+  pos: 'var(--positive)',
+  neg: 'var(--negative)',
+  warn: 'var(--warn)',
+  info: 'var(--info)',
+  neutral: 'var(--ink-3)',
+};
+
+const TONE_TINTS = {
+  pos: 'var(--positive-tint)',
+  neg: 'var(--negative-tint)',
+  warn: 'var(--warn-tint)',
+  info: 'var(--info-tint)',
+  neutral: 'var(--surface-2)',
+};
+
+function StatBlock({ data }) {
+  const color = TONE_COLORS[data.tone] || 'var(--ink)';
+  return (
+    <div style={{
+      margin: '8px 0',
+      padding: '12px 14px',
+      borderRadius: 'var(--radius-sm)',
+      border: '1px solid var(--line)',
+      background: 'var(--surface)',
+    }}>
+      <div style={{
+        fontSize: 10.5,
+        fontWeight: 600,
+        letterSpacing: '0.08em',
+        textTransform: 'uppercase',
+        color: 'var(--ink-3)',
+        marginBottom: 4,
+      }}>
+        {data.label}
+      </div>
+      <div className="num" style={{
+        fontSize: 28,
+        fontWeight: 400,
+        letterSpacing: '-0.02em',
+        lineHeight: 1.05,
+        color,
+        fontFeatureSettings: '"tnum" 1',
+      }}>
+        {data.value}
+      </div>
+      {data.sub && (
+        <div style={{ fontSize: 11.5, color: 'var(--ink-3)', marginTop: 4 }}>{data.sub}</div>
+      )}
+    </div>
+  );
+}
+
+function BarsBlock({ data }) {
+  const rows = data.rows || [];
+  const unit = data.unit || '';
+  const max = Math.max(...rows.map((r) => r.value), 0) || 1;
+
+  return (
+    <div style={{ margin: '8px 0' }}>
+      {data.title && (
+        <div style={{
+          fontSize: 10.5, fontWeight: 600, letterSpacing: '0.08em',
+          textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 8,
+        }}>
+          {data.title}
+        </div>
+      )}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {rows.map((row, i) => {
+          const pct = (row.value / max) * 100;
+          const color = TONE_COLORS[row.tone] || 'var(--ink)';
+          return (
+            <div key={i}>
+              <div style={{
+                display: 'flex', justifyContent: 'space-between',
+                marginBottom: 4, fontSize: 12.5,
+              }}>
+                <span style={{ color: 'var(--ink-2)' }}>{row.label}</span>
+                <span className="num tnum" style={{ fontSize: 13, color }}>
+                  {row.value}{unit}
+                </span>
+              </div>
+              <div style={{
+                position: 'relative', height: 7,
+                background: 'var(--surface-2)',
+                border: '1px solid var(--line)',
+                borderRadius: 999,
+              }}>
+                <div style={{
+                  position: 'absolute', left: 0, top: 0, bottom: 0,
+                  width: `${Math.min(100, pct)}%`,
+                  background: color,
+                  borderRadius: 999,
+                  transition: 'width 0.4s ease',
+                }}/>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function TableBlock({ data }) {
+  const headers = data.headers || [];
+  const rows = data.rows || [];
+  return (
+    <div style={{ margin: '8px 0', overflowX: 'auto', borderRadius: 'var(--radius-sm)', border: '1px solid var(--line)' }}>
+      <table className="table" style={{ minWidth: 0, fontSize: 12.5 }}>
+        <thead>
+          <tr>
+            {headers.map((h, i) => (
+              <th key={i} style={{ whiteSpace: 'nowrap' }}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, i) => (
+            <tr key={i}>
+              {row.map((cell, j) => (
+                <td key={j}>{cell}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function CalloutBlock({ data }) {
+  const toneKey = data.tone || 'info';
+  const color = TONE_COLORS[toneKey] || TONE_COLORS.info;
+  const tint = TONE_TINTS[toneKey] || TONE_TINTS.info;
+  return (
+    <div style={{
+      margin: '8px 0',
+      padding: '10px 14px',
+      borderRadius: 'var(--radius-sm)',
+      background: tint,
+      borderLeft: `3px solid ${color}`,
+      border: `1px solid ${color}`,
+      borderLeftWidth: 3,
+    }}>
+      {data.title && (
+        <div style={{
+          fontSize: 12, fontWeight: 600,
+          color, marginBottom: 4,
+        }}>
+          {data.title}
+        </div>
+      )}
+      <div style={{ fontSize: 13, lineHeight: 1.5, color: 'var(--ink-2)' }}>
+        {data.body}
+      </div>
+    </div>
+  );
+}
+
+function ListBlock({ data }) {
+  const items = data.items || [];
+  return (
+    <div style={{ margin: '8px 0' }}>
+      {data.title && (
+        <div style={{
+          fontSize: 10.5, fontWeight: 600, letterSpacing: '0.08em',
+          textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 8,
+        }}>
+          {data.title}
+        </div>
+      )}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {items.map((item, i) => {
+          const dotColor = TONE_COLORS[item.tone] || 'var(--ink-3)';
+          return (
+            <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+              <span style={{
+                width: 6, height: 6,
+                borderRadius: 999,
+                background: dotColor,
+                flexShrink: 0,
+                marginTop: 6,
+              }}/>
+              <span style={{ fontSize: 13, lineHeight: 1.5, color: 'var(--ink-2)' }}>
+                {item.text}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ─── Markdown inline renderer ───────────────────────────────────────────── */
+
+function renderInline(text) {
+  // Parse **bold** and *italic* inline, returning React nodes
+  const segments = [];
+  const re = /(\*\*[^*]+\*\*|\*[^*]+\*)/g;
+  let last = 0;
+  let m;
+  let key = 0;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) segments.push(<React.Fragment key={key++}>{text.slice(last, m.index)}</React.Fragment>);
+    const raw = m[0];
+    if (raw.startsWith('**')) {
+      segments.push(<strong key={key++}>{raw.slice(2, -2)}</strong>);
+    } else {
+      segments.push(<em key={key++}>{raw.slice(1, -1)}</em>);
+    }
+    last = m.index + raw.length;
+  }
+  if (last < text.length) segments.push(<React.Fragment key={key++}>{text.slice(last)}</React.Fragment>);
+  return segments;
+}
+
+function MicroMarkdown({ text }) {
+  const lines = text.split('\n');
+  const output = [];
+  let listItems = [];
+  let listType = null; // 'ul' | 'ol'
+  let key = 0;
+
+  function flushList() {
+    if (!listItems.length) return;
+    const Tag = listType === 'ol' ? 'ol' : 'ul';
+    output.push(
+      <Tag key={key++} style={{ margin: '6px 0 6px 18px', padding: 0, lineHeight: 1.6 }}>
+        {listItems.map((item, i) => (
+          <li key={i} style={{ marginBottom: 2 }}>{renderInline(item)}</li>
+        ))}
+      </Tag>
+    );
+    listItems = [];
+    listType = null;
+  }
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    // Heading 1
+    if (/^# /.test(line)) {
+      flushList();
+      output.push(
+        <div key={key++} className="h2" style={{ marginTop: 10, marginBottom: 4, color: 'var(--ink)' }}>
+          {renderInline(line.slice(2))}
+        </div>
+      );
+      continue;
+    }
+    // Heading 2
+    if (/^## /.test(line)) {
+      flushList();
+      output.push(
+        <div key={key++} className="h2" style={{ marginTop: 10, marginBottom: 4, color: 'var(--ink)', fontSize: 14 }}>
+          {renderInline(line.slice(3))}
+        </div>
+      );
+      continue;
+    }
+    // Heading 3
+    if (/^### /.test(line)) {
+      flushList();
+      output.push(
+        <div key={key++} style={{ fontSize: 12.5, fontWeight: 600, marginTop: 8, marginBottom: 2, color: 'var(--ink)' }}>
+          {renderInline(line.slice(4))}
+        </div>
+      );
+      continue;
+    }
+    // Unordered list item
+    if (/^[-*] /.test(line)) {
+      if (listType && listType !== 'ul') flushList();
+      listType = 'ul';
+      listItems.push(line.slice(2));
+      continue;
+    }
+    // Ordered list item
+    if (/^\d+\. /.test(line)) {
+      if (listType && listType !== 'ol') flushList();
+      listType = 'ol';
+      listItems.push(line.replace(/^\d+\. /, ''));
+      continue;
+    }
+
+    // Blank line — paragraph break
+    if (line.trim() === '') {
+      flushList();
+      output.push(<div key={key++} style={{ height: 6 }}/>);
+      continue;
+    }
+
+    // Normal text
+    flushList();
+    output.push(<div key={key++} style={{ lineHeight: 1.6 }}>{renderInline(line)}</div>);
+  }
+
+  flushList();
+  return <>{output}</>;
+}
+
+/* ─── DSL parser ─────────────────────────────────────────────────────────── */
+
+function parseBlocks(text) {
+  // Split on ```meridian-xxx ... ``` fences
+  const parts = [];
+  const fenceRe = /```(meridian-\w+)\n([\s\S]*?)```/g;
+  let last = 0;
+  let m;
+  while ((m = fenceRe.exec(text)) !== null) {
+    if (m.index > last) {
+      parts.push({ type: 'markdown', text: text.slice(last, m.index) });
+    }
+    parts.push({ type: m[1], raw: m[2].trim() });
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) {
+    parts.push({ type: 'markdown', text: text.slice(last) });
+  }
+  return parts;
+}
+
+function renderBlock(block, i) {
+  if (block.type === 'markdown') {
+    return <MicroMarkdown key={i} text={block.text}/>;
+  }
+
+  let data;
+  try {
+    data = JSON.parse(block.raw);
+  } catch {
+    return (
+      <pre key={i} className="mono" style={{
+        margin: '6px 0', padding: '8px 10px', fontSize: 11,
+        background: 'var(--surface)', border: '1px solid var(--line)',
+        borderRadius: 'var(--radius-sm)', overflowX: 'auto',
+        whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+        color: 'var(--ink-2)',
+      }}>
+        {block.raw}
+      </pre>
+    );
+  }
+
+  switch (block.type) {
+    case 'meridian-stat':    return <StatBlock key={i} data={data}/>;
+    case 'meridian-bars':    return <BarsBlock key={i} data={data}/>;
+    case 'meridian-table':   return <TableBlock key={i} data={data}/>;
+    case 'meridian-callout': return <CalloutBlock key={i} data={data}/>;
+    case 'meridian-list':    return <ListBlock key={i} data={data}/>;
+    default:
+      return (
+        <pre key={i} className="mono" style={{
+          margin: '6px 0', padding: '8px 10px', fontSize: 11,
+          background: 'var(--surface)', border: '1px solid var(--line)',
+          borderRadius: 'var(--radius-sm)', overflowX: 'auto',
+          whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'var(--ink-2)',
+        }}>
+          {block.raw}
+        </pre>
+      );
+  }
+}
+
+export function RichMessage({ text }) {
+  const blocks = parseBlocks(text ?? '');
+  return <>{blocks.map((block, i) => renderBlock(block, i))}</>;
+}
+
 export function AgentChip({ agent, prominent }) {
   const meta = AGENT_META[agent];
   if (!meta) return null;
@@ -194,7 +568,7 @@ export function MessageWithTrace({ m, agent, prominentAgents, send }) {
     <div className="msg-agent fade-in">
       <AgentChip agent={resolvedAgent} prominent={prominentAgents}/>
       <div className="msg-body">
-        <MD text={content}/>
+        <RichMessage text={content}/>
         {m.structured?.kind === "recommend-payoff" && <PayoffActionCard data={m.structured}/>}
         {m.actions && (
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 10 }}>
@@ -313,8 +687,11 @@ function StreamError({ error, onDismiss }) {
 }
 
 /* ─── ChatPanel ──────────────────────────────────────────────────────────── */
-export function ChatPanel({ open, onClose, prominentAgents, online, model }) {
-  const { messages, sendMessage, isStreaming, activeAgent, error, clear } = useAgentStream();
+export function ChatPanel({ open, onClose, prominentAgents, online, model, advisorScope }) {
+  const advisorScopeRef = React.useRef(advisorScope);
+  React.useEffect(() => { advisorScopeRef.current = advisorScope; }, [advisorScope]);
+
+  const { messages, sendMessage, isStreaming, activeAgent, error, clear } = useAgentStream(advisorScopeRef);
 
   const [draft, setDraft] = React.useState("");
   const [streamError, setStreamError] = React.useState(null);
@@ -352,9 +729,9 @@ export function ChatPanel({ open, onClose, prominentAgents, online, model }) {
     "Where can I cut spending?",
   ];
 
-  // Sub-title reflects backend state
+  const SCOPE_LABELS = { debt: "Debt analyzer scope", savings: "Savings scope", budget: "Budget scope", payoff: "Payoff optimizer scope" };
   const subTitle = online
-    ? `Connected${model ? ` · ${model}` : ""} · Supervisor + 4 specialists`
+    ? `Connected${model ? ` · ${model}` : ""}${advisorScope ? ` · ${SCOPE_LABELS[advisorScope]}` : " · Supervisor + 4 specialists"}`
     : "Backend offline";
 
   const inputDisabled = !online || isStreaming;
@@ -399,7 +776,7 @@ export function ChatPanel({ open, onClose, prominentAgents, online, model }) {
 
       <div className="chat-stream" ref={streamRef}>
         <div className="agent-chip" style={{ alignSelf: "center", color: "var(--ink-4)", fontSize: 10.5, letterSpacing: "0.06em" }}>
-          <I.lock size={10}/> ON-DEVICE · NOTHING LEAVES THIS MACHINE
+          <I.lock size={10}/> PII REDACTED · EGRESS TO OPENROUTER ONLY
         </div>
 
         {thread.length === 0 && online && (

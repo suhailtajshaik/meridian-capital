@@ -24,6 +24,7 @@ import asyncio
 import contextvars
 import json
 import logging
+import re
 from datetime import date, datetime, timezone
 from typing import Any, Callable, Optional
 
@@ -53,14 +54,24 @@ from app.agents.payoff_optimizer import PayoffOptimizer
 from app.agents.savings_strategist import SavingsStrategist
 from app.agents.schemas import (
     BudgetAdvice,
+    BudgetCategoryAnalysis,
     ChatMessage,
     DebtAnalysis,
+    DebtCategory,
+    DebtItem,
+    Milestone,
+    PayoffOrderItem,
     PayoffPlan,
+    PayoffStrategy,
+    Recommendation,
+    RiskLevel,
     SavingsStrategy,
+    SavingsVehicle,
     Snapshot,
     TraceEvent,
 )
 from app.agents.supervisor import Supervisor
+from app.utils.math_engine import compare_strategies, avalanche_plan
 
 logger = logging.getLogger(__name__)
 
@@ -145,6 +156,366 @@ def _append_trace(state: AdvisorState, event_type: str, agent: str, payload: dic
     state["trace"] = trace  # type: ignore[typeddict-item]
 
 
+def _build_structured_fallback(
+    debt: Optional[Any],
+    budget: Optional[Any],
+    savings: Optional[Any],
+    payoff: Optional[Any],
+    user_question: str,
+) -> str:
+    """Compose a DSL-block answer from already-computed agent outputs.
+
+    Used when the synth LLM call fails — we still have all the structured data,
+    so we render it directly instead of apologizing.
+    """
+    q = (user_question or "").lower()
+    parts: list[str] = []
+
+    def _money(v: Optional[float]) -> str:
+        if v is None:
+            return "$0"
+        return f"${v:,.0f}" if abs(v) >= 100 else f"${v:,.2f}"
+
+    show_debt = debt is not None and (
+        not q or any(k in q for k in ("debt", "owe", "balance", "loan", "credit", "apr", "rate"))
+    )
+    show_budget = budget is not None and (
+        not q or any(k in q for k in ("budget", "spend", "expense", "income", "surplus", "deficit", "category"))
+    )
+    show_savings = savings is not None and (
+        not q or any(k in q for k in ("savings", "save", "emergency", "fund", "runway"))
+    )
+    show_payoff = payoff is not None and (
+        not q or any(k in q for k in ("payoff", "free", "schedule", "avalanche", "snowball", "interest"))
+    )
+
+    if not any([show_debt, show_budget, show_savings, show_payoff]):
+        show_debt = debt is not None
+        show_budget = budget is not None
+        show_savings = savings is not None
+        show_payoff = payoff is not None
+
+    if show_debt and debt is not None:
+        block = json.dumps({
+            "label": "Total debt",
+            "value": _money(debt.total_debt),
+            "tone": "neg",
+            "sub": f"across {len(debt.debts)} liabilities · {debt.weighted_avg_interest:.2f}% avg APR · highest: {debt.highest_priority_debt}",
+        })
+        parts.append(f"```meridian-stat\n{block}\n```")
+
+        if any(k in q for k in ("list", "show", "what debts", "all debts")):
+            table = json.dumps({
+                "headers": ["Debt", "Balance", "APR", "Min/mo"],
+                "rows": [
+                    [d.name, _money(d.balance), f"{d.interest_rate:.2f}%", _money(d.minimum_payment)]
+                    for d in debt.debts
+                ],
+            })
+            parts.append(f"```meridian-table\n{table}\n```")
+
+    if show_budget and budget is not None:
+        v = budget.surplus_or_deficit
+        label = "surplus" if v >= 0 else "deficit"
+        block = json.dumps({
+            "label": f"Monthly {label}",
+            "value": _money(abs(v)),
+            "tone": "pos" if v >= 0 else "neg",
+            "sub": f"{_money(budget.monthly_income)} income − {_money(budget.total_expenses)} expenses",
+        })
+        parts.append(f"```meridian-stat\n{block}\n```")
+
+    if show_savings and savings is not None:
+        parts.append(
+            f"**Savings:** runway {savings.months_of_runway:.1f} months · "
+            f"target {_money(savings.emergency_fund_target)} · "
+            f"recommended {_money(savings.recommended_monthly_savings)}/mo."
+        )
+
+    if show_payoff and payoff is not None:
+        block = json.dumps({
+            "label": "Debt-free date",
+            "value": payoff.debt_free_date,
+            "tone": "pos",
+            "sub": f"{payoff.strategy.value} · {_money(payoff.monthly_budget_for_debt)}/mo · saves {_money(payoff.total_interest_saved_vs_minimum)} vs minimums",
+        })
+        parts.append(f"```meridian-stat\n{block}\n```")
+
+    if not parts:
+        return (
+            "I don't have enough analyzed data to answer that yet. "
+            "Add documents in the Documents tab to populate the advisors."
+        )
+
+    return "\n\n".join(parts)
+
+
+def _categorize_debt(name: str) -> DebtCategory:
+    n = name.lower()
+    if any(k in n for k in ("credit", "card", "capital one", "chase sapphire", "amex")):
+        return DebtCategory.credit_card
+    if any(k in n for k in ("student", "sofi", "navient", "fafsa")):
+        return DebtCategory.student_loan
+    if any(k in n for k in ("mortgage", "wells", "rocket", "home loan")):
+        return DebtCategory.mortgage
+    if any(k in n for k in ("auto", "honda", "toyota", "ford", "car loan")):
+        return DebtCategory.auto_loan
+    if any(k in n for k in ("medical", "hospital")):
+        return DebtCategory.medical
+    if "personal" in n:
+        return DebtCategory.personal_loan
+    return DebtCategory.other
+
+
+def _pretty_source_name(filename: str | None, fallback: str) -> str:
+    """Convert a CSV filename like 'capital_one_apr2026.csv' to 'Capital One'."""
+    raw = (filename or fallback or "").lower()
+    raw = raw.replace(".csv", "").replace(".xlsx", "").replace(".pdf", "")
+    raw = re.sub(r"[_\-]?(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|q[1-4])[_\-]?\d{0,4}", "", raw)
+    raw = raw.strip("_- ")
+
+    KNOWN = [
+        ("capital_one", "Capital One Credit Card"),
+        ("chase_checking", "Chase Checking"),
+        ("chase_sapphire", "Chase Sapphire"),
+        ("wells_mortgage", "Wells Fargo Mortgage"),
+        ("wells", "Wells Fargo"),
+        ("sofi_student_loan", "SoFi Student Loan"),
+        ("sofi", "SoFi"),
+        ("honda_auto_loan", "Honda Auto Loan"),
+        ("honda", "Honda Financial"),
+        ("schwab", "Schwab Brokerage"),
+    ]
+    for key, label in KNOWN:
+        if key in raw:
+            return label
+
+    return " ".join(w.capitalize() for w in re.split(r"[_\s]+", raw) if w) or "Unknown"
+
+
+def build_deterministic_snapshot(financial_data: dict) -> Snapshot:
+    """Construct a Snapshot directly from anonymized doc_* entries.
+
+    Used when LLM agents fail (e.g., OpenRouter quota): we still have
+    structured numbers from the anonymizer + math_engine, so every
+    advisor view can populate without any model call.
+    """
+    debts: list[DebtItem] = []
+    monthly_income = 0.0
+    monthly_expenses = 0.0
+    spending_by_category: dict[str, float] = {}
+
+    for key, doc in financial_data.items():
+        if not isinstance(doc, dict):
+            continue
+        doc_type = doc.get("doc_type")
+        pretty = _pretty_source_name(doc.get("source_filename"), key.replace("doc_", ""))
+
+        if doc_type == "debt_statement":
+            balance = doc.get("balance")
+            apr = doc.get("apr")
+            payment = doc.get("monthly_payment") or 0.0
+            lender_label = doc.get("lender")
+            display_name = (
+                f"{lender_label} {pretty.split(' ', 1)[1]}" if lender_label and " " in pretty
+                else lender_label or pretty
+            )
+            if balance and apr is not None:
+                debts.append(DebtItem(
+                    name=display_name,
+                    category=_categorize_debt(display_name),
+                    balance=float(balance),
+                    interest_rate=float(apr),
+                    minimum_payment=float(payment),
+                    due_date=doc.get("statement_date"),
+                ))
+
+        elif doc_type == "amortization":
+            balance = doc.get("current_balance")
+            apr = doc.get("implied_apr")
+            payment = doc.get("monthly_payment") or 0.0
+            if balance and apr is not None:
+                debts.append(DebtItem(
+                    name=pretty,
+                    category=_categorize_debt(pretty),
+                    balance=float(balance),
+                    interest_rate=float(apr),
+                    minimum_payment=float(payment),
+                    due_date=None,
+                ))
+
+        elif doc_type == "credit_card_statement":
+            balance = doc.get("current_balance")
+            apr = doc.get("apr")
+            min_payment = doc.get("minimum_payment") or 0.0
+            if balance and apr is not None:
+                debts.append(DebtItem(
+                    name=pretty,
+                    category=DebtCategory.credit_card,
+                    balance=float(balance),
+                    interest_rate=float(apr),
+                    minimum_payment=float(min_payment),
+                    due_date=None,
+                ))
+
+        if doc_type in ("transactions", "credit_card_statement"):
+            inc = doc.get("estimated_monthly_income") or 0.0
+            spend = doc.get("estimated_monthly_spend") or 0.0
+            if doc_type == "transactions":
+                monthly_income += float(inc)
+                monthly_expenses += float(spend)
+            cat_map = doc.get("spending_by_category") or {}
+            for cat, amt in cat_map.items():
+                spending_by_category[cat] = spending_by_category.get(cat, 0.0) + float(amt)
+
+    # ── DebtAnalysis
+    debt_analysis: Optional[DebtAnalysis] = None
+    if debts:
+        total_debt = sum(d.balance for d in debts)
+        weighted_avg = (sum(d.balance * d.interest_rate for d in debts) / total_debt) if total_debt > 0 else 0.0
+        worst = max(debts, key=lambda d: d.interest_rate)
+        min_total = sum(d.minimum_payment for d in debts)
+        if weighted_avg >= 18:
+            risk = RiskLevel.critical
+        elif weighted_avg >= 10:
+            risk = RiskLevel.high
+        elif weighted_avg >= 6:
+            risk = RiskLevel.moderate
+        else:
+            risk = RiskLevel.low
+        debt_analysis = DebtAnalysis(
+            debts=debts,
+            total_debt=round(total_debt, 2),
+            weighted_avg_interest=round(weighted_avg, 2),
+            highest_priority_debt=worst.name,
+            monthly_minimum_total=round(min_total, 2),
+            debt_to_income_ratio=round(total_debt / (monthly_income * 12), 2) if monthly_income > 0 else None,
+            risk_level=risk,
+            summary=(
+                f"{len(debts)} liabilities totaling ${total_debt:,.0f} at {weighted_avg:.2f}% weighted APR. "
+                f"Highest cost: {worst.name} at {worst.interest_rate:.2f}%."
+            ),
+        )
+
+    # ── BudgetAdvice
+    budget_advice: Optional[BudgetAdvice] = None
+    if monthly_income > 0 or spending_by_category:
+        categories: list[BudgetCategoryAnalysis] = []
+        for cat, amt in sorted(spending_by_category.items(), key=lambda kv: -kv[1]):
+            pct_income = (amt / monthly_income * 100) if monthly_income > 0 else 0.0
+            if cat.lower() in ("housing", "rent", "mortgage"):
+                rec = Recommendation.on_track
+            elif pct_income > 15:
+                rec = Recommendation.reduce
+            else:
+                rec = Recommendation.on_track
+            categories.append(BudgetCategoryAnalysis(
+                category=cat,
+                amount=round(amt, 2),
+                percentage_of_income=round(pct_income, 2),
+                recommendation=rec,
+                suggested_amount=None,
+            ))
+        surplus = monthly_income - monthly_expenses
+        sorted_cats = sorted(spending_by_category.items(), key=lambda kv: -kv[1])
+        top3 = [f"Reduce {cat} (${amt:,.0f}/mo)" for cat, amt in sorted_cats[:3]] or ["No major spending categories detected."]
+        actionable = (
+            ["Build an emergency fund", "Pay down highest-APR debt first", "Automate monthly savings"]
+            if surplus > 0
+            else ["Cut discretionary spending", "Review subscriptions", "Defer non-essential purchases"]
+        )
+        budget_advice = BudgetAdvice(
+            monthly_income=round(monthly_income, 2),
+            total_expenses=round(monthly_expenses, 2),
+            surplus_or_deficit=round(surplus, 2),
+            categories=categories,
+            top_3_savings_opportunities=top3,
+            actionable_steps=actionable,
+            fifty_thirty_twenty={
+                "needs": round(monthly_income * 0.5, 2),
+                "wants": round(monthly_income * 0.3, 2),
+                "savings": round(monthly_income * 0.2, 2),
+            },
+        )
+
+    # ── SavingsStrategy
+    savings_strategy: Optional[SavingsStrategy] = None
+    if budget_advice:
+        target = round(monthly_expenses * 3, 2)
+        rec_save = round(max(0.0, budget_advice.surplus_or_deficit) * 0.5, 2)
+        savings_strategy = SavingsStrategy(
+            emergency_fund_target=target,
+            current_emergency_fund=0.0,
+            months_of_runway=0.0,
+            recommended_monthly_savings=rec_save,
+            savings_vehicles=[
+                SavingsVehicle(type="High-Yield Savings Account", reason="Liquid, FDIC-insured emergency fund vehicle.", expected_yield=4.5),
+            ],
+            milestone_timeline=[
+                Milestone(goal="1-month emergency fund", eta=f"{int((monthly_expenses / rec_save)) if rec_save > 0 else 0} months", target_amount=round(monthly_expenses, 2)),
+                Milestone(goal="3-month emergency fund", eta=f"{int((target / rec_save)) if rec_save > 0 else 0} months", target_amount=target),
+            ],
+            strategy_narrative=(
+                f"Build a ${target:,.0f} emergency fund (3 months expenses). "
+                f"At ${rec_save:,.0f}/month savings, milestones reach steadily."
+            ),
+        )
+
+    # ── PayoffPlan
+    payoff_plan: Optional[PayoffPlan] = None
+    if debt_analysis and debt_analysis.debts:
+        debt_inputs = [
+            {"name": d.name, "balance": d.balance, "apr": d.interest_rate / 100.0, "minimum_payment": d.minimum_payment}
+            for d in debt_analysis.debts
+        ]
+        budget_for_debt = debt_analysis.monthly_minimum_total + (
+            max(0.0, budget_advice.surplus_or_deficit) * 0.5 if budget_advice else 0.0
+        )
+        try:
+            cmp = compare_strategies(debt_inputs, budget_for_debt)
+            avalanche = avalanche_plan(debt_inputs, budget_for_debt)
+            order = [
+                PayoffOrderItem(
+                    debt_name=name,
+                    months_to_payoff=avalanche["months_to_payoff"].get(name, 0),
+                    total_interest_paid=round(avalanche["total_interest_by_debt"].get(name, 0.0), 2),
+                )
+                for name in avalanche["payoff_order"]
+            ]
+            min_total_interest = cmp.get("minimum_only_total_interest", avalanche["total_interest"])
+            saved = max(0.0, min_total_interest - avalanche["total_interest"])
+            payoff_plan = PayoffPlan(
+                strategy=PayoffStrategy.avalanche,
+                monthly_budget_for_debt=round(budget_for_debt, 2),
+                payoff_order=order,
+                total_interest_saved_vs_minimum=round(saved, 2),
+                debt_free_date=avalanche["debt_free_date"],
+                monthly_schedule=avalanche["monthly_schedule"],
+                comparison={
+                    "avalanche": {
+                        "total_interest": round(cmp["avalanche"]["total_interest"], 2),
+                        "debt_free_date": cmp["avalanche"]["debt_free_date"],
+                        "months_to_payoff": cmp["avalanche"]["months_to_payoff"],
+                    },
+                    "snowball": {
+                        "total_interest": round(cmp["snowball"]["total_interest"], 2),
+                        "debt_free_date": cmp["snowball"]["debt_free_date"],
+                        "months_to_payoff": cmp["snowball"]["months_to_payoff"],
+                    },
+                },
+            )
+        except Exception as exc:
+            logger.warning("Deterministic payoff math failed: %s", exc)
+
+    return Snapshot(
+        debt_analysis=debt_analysis,
+        budget_advice=budget_advice,
+        savings_strategy=savings_strategy,
+        payoff_plan=payoff_plan,
+        generated_at=_now_iso(),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Graph factory
 # ---------------------------------------------------------------------------
@@ -168,6 +539,15 @@ def create_advisor_graph(llm: Any, db_path: str) -> Any:
     # Node: supervisor
     # ------------------------------------------------------------------
     async def supervisor_node(state: AdvisorState) -> AdvisorState:
+        pre_intent = state.get("intent", "full_snapshot")
+        if pre_intent and pre_intent != "full_snapshot":
+            _append_trace(state, "agent_complete", "supervisor", {"intent": pre_intent, "pre_set": True})
+            return {
+                **state,
+                "current_agent": "supervisor",
+                "agents_completed": state.get("agents_completed", []),
+            }
+
         _append_trace(state, "agent_start", "supervisor", {"intent_classification": True})
         supervisor = Supervisor(llm=llm)
 
@@ -296,9 +676,12 @@ def create_advisor_graph(llm: Any, db_path: str) -> Any:
         )
         _append_trace(state, "synth", "clarify", {"question": question})
 
+        callout = json.dumps({"tone": "info", "title": "A little more context needed", "body": question})
+        clarify_content = f"```meridian-callout\n{callout}\n```"
+
         clarify_msg = ChatMessage(
             role="assistant",
-            content=question,
+            content=clarify_content,
             agent="supervisor",
         )
         messages = list(state.get("messages", []))
@@ -346,23 +729,46 @@ def create_advisor_graph(llm: Any, db_path: str) -> Any:
 
         context_str = "\n".join(parts) if parts else "No structured analysis available yet."
 
+        all_messages = state.get("messages", [])
+        recent_messages = all_messages[-8:] if len(all_messages) > 8 else all_messages
+
+        transcript_lines: list[str] = []
         user_question = ""
-        for msg in reversed(state.get("messages", [])):
+        for msg in recent_messages:
             role = getattr(msg, "role", None) or (msg.get("role") if isinstance(msg, dict) else None)
+            content = getattr(msg, "content", None) or (msg.get("content") if isinstance(msg, dict) else "")
+            if role in ("user", "assistant"):
+                transcript_lines.append(f"{role}: {content}")
             if role == "user":
-                content = getattr(msg, "content", None) or (msg.get("content") if isinstance(msg, dict) else "")
                 user_question = content
-                break
+
+        transcript_str = "\n".join(transcript_lines) if transcript_lines else ""
 
         synth_prompt = (
             f"You are Meridian, a friendly and precise AI financial advisor.\n\n"
             f"Structured analysis results:\n{context_str}\n\n"
-            f"User's question: {user_question}\n\n"
-            f"Write a clear, conversational response (3-6 sentences) that:\n"
+            f"Conversation so far:\n{transcript_str}\n\n"
+            f"Latest user question: {user_question}\n\n"
+            f"You can include rich rendering blocks in your reply. The UI parses fenced JSON blocks tagged\n"
+            f"`meridian-stat`, `meridian-bars`, `meridian-table`, `meridian-callout`, `meridian-list`.\n\n"
+            f"When the user asks for a list, comparison, or specific number, prefer a block over a sentence.\n"
+            f"Schemas:\n"
+            f'  meridian-stat:    {{"label","value","sub?","tone": "neg|pos|info|neutral"}}\n'
+            f'  meridian-bars:    {{"title","unit?","rows":[{{"label","value","tone?"}}]}}\n'
+            f'  meridian-table:   {{"headers":[...], "rows":[[...],...]}}\n'
+            f'  meridian-callout: {{"tone","title","body"}}\n'
+            f'  meridian-list:    {{"title?","items":[{{"text","tone?"}}]}}\n\n'
+            f"Use AT MOST 2 blocks per reply. Wrap each block in triple backticks with the language tag, e.g.\n\n"
+            f"```meridian-stat\n"
+            f'{{"label": "Total debt", "value": "<dollar amount from data>", "tone": "neg"}}\n'
+            f"```\n\n"
+            f"Keep surrounding text concise — one sentence to set up, one to follow up.\n\n"
+            f"Write a clear, conversational response that:\n"
             f"1. Directly answers the user's question using the structured data above.\n"
-            f"2. Highlights 1-2 key insights or action items.\n"
-            f"3. Ends with an invitation to explore a specific area further.\n"
-            f"Do not repeat all the numbers — the dashboard shows those. Be warm and actionable."
+            f"2. Uses a meridian-* block when answering with a number, comparison, or list — but never more than 2 blocks per reply.\n"
+            f"3. Highlights 1-2 key insights or action items.\n"
+            f"4. Ends with an invitation to explore a specific area further.\n"
+            f"Do not repeat all the numbers in prose if you've put them in a block. Be warm and actionable."
         )
 
         messages_to_send = [
@@ -375,9 +781,12 @@ def create_advisor_graph(llm: Any, db_path: str) -> Any:
             answer = raw.content if hasattr(raw, "content") else str(raw)
         except Exception as exc:
             logger.error("synth_node LLM call failed: %s", exc)
-            answer = (
-                "I've analyzed your financial data. "
-                "Check the dashboard panels for detailed breakdowns of your debts, budget, savings, and payoff plan."
+            answer = _build_structured_fallback(
+                debt=state.get("debt_analysis"),
+                budget=state.get("budget_advice"),
+                savings=state.get("savings_strategy"),
+                payoff=state.get("payoff_plan"),
+                user_question=user_question,
             )
 
         completed = state.get("agents_completed", [])
@@ -584,13 +993,31 @@ async def run_full_snapshot(
         except Exception as exc:
             logger.error("PayoffOptimizer failed: %s", exc)
 
-    return Snapshot(
+    snap = Snapshot(
         debt_analysis=debt_result,
         budget_advice=budget_result,
         savings_strategy=savings_result,
         payoff_plan=payoff_result,
         generated_at=_now_iso(),
     )
+
+    if not any([debt_result, budget_result, savings_result, payoff_result]):
+        det = build_deterministic_snapshot(user_data)
+        if any([det.debt_analysis, det.budget_advice, det.savings_strategy, det.payoff_plan]):
+            logger.warning("All LLM agents failed — using deterministic snapshot from anonymized data.")
+            return det
+
+    if any(r is None for r in (debt_result, budget_result, savings_result, payoff_result)):
+        det = build_deterministic_snapshot(user_data)
+        return Snapshot(
+            debt_analysis=debt_result or det.debt_analysis,
+            budget_advice=budget_result or det.budget_advice,
+            savings_strategy=savings_result or det.savings_strategy,
+            payoff_plan=payoff_result or det.payoff_plan,
+            generated_at=snap.generated_at,
+        )
+
+    return snap
 
 
 # ---------------------------------------------------------------------------

@@ -1,11 +1,11 @@
 import React from 'react';
 import { I } from './icons.jsx';
 import { AGENT_META } from './data.js';
-import { Sparkline, Donut, LineArea } from './charts.jsx';
+import { Sparkline, Donut } from './charts.jsx';
 
 /* Dashboard view — hero stats, net worth chart, agent insights, transactions */
 
-export function StatCard({ label, value, cents, delta, deltaLabel, sparkData, sparkColor, accent, icon: Ico }) {
+export function StatCard({ label, value, cents, delta, deltaLabel, sparkData, sparkColor, accent, icon: Ico, skeleton }) {
   const positive = (delta ?? 0) >= 0;
   return (
     <div className="stat">
@@ -13,10 +13,21 @@ export function StatCard({ label, value, cents, delta, deltaLabel, sparkData, sp
         {Ico && <Ico size={12}/>}
         {label}
       </div>
-      <div className="stat-value">
-        ${Math.abs(value).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-        {cents != null && <span className="cents">.{cents}</span>}
-      </div>
+      {skeleton
+        ? (
+          <div
+            className="skeleton"
+            style={{ width: 80, height: 28, marginTop: 2 }}
+            aria-label="Loading…"
+            aria-busy="true"
+          />
+        ) : (
+          <div className="stat-value">
+            ${Math.abs(value).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+            {cents != null && <span className="cents">.{cents}</span>}
+          </div>
+        )
+      }
       {delta != null && (
         <div className={`stat-delta ${positive ? "pos" : "neg"}`}>
           {positive ? <I.trend_up size={12}/> : <I.trend_dn size={12}/>}
@@ -60,21 +71,17 @@ export function AgentInsightCard({ agent, headline, body, metric, metricSub, act
 }
 
 export function GoalRow({ g }) {
-  const pct = g.target > 0 ? (g.balance / g.target) * 100 : 0;
   return (
     <div style={{ padding: "12px 0", borderBottom: "1px solid var(--line)" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
         <div>
           <div style={{ fontSize: 13.5, fontWeight: 500 }}>{g.name}</div>
-          <div style={{ fontSize: 11, color: "var(--ink-3)" }}>{g.category} · ETA {g.eta}</div>
+          <div style={{ fontSize: 11, color: "var(--ink-3)" }}>{g.category}</div>
         </div>
         <div style={{ textAlign: "right" }}>
-          <div className="num tnum" style={{ fontSize: 15 }}>${g.balance.toLocaleString()}</div>
-          <div style={{ fontSize: 11, color: "var(--ink-3)" }}>of ${g.target.toLocaleString()}</div>
+          <div className="num tnum" style={{ fontSize: 15 }}>${g.target.toLocaleString()}</div>
+          {g.eta && <div style={{ fontSize: 11, color: "var(--ink-3)" }}>ETA {g.eta}</div>}
         </div>
-      </div>
-      <div className="bar-track">
-        <div className="bar-fill pos" style={{ width: `${Math.min(100, pct)}%` }}/>
       </div>
     </div>
   );
@@ -139,7 +146,6 @@ function snapshotToStats(snapshot) {
 
   const savings = sa?.milestone_timeline?.map((m) => ({
     name: m.goal,
-    balance: 0,
     target: m.target_amount,
     monthly: sa.recommended_monthly_savings ?? 0,
     eta: m.eta,
@@ -159,7 +165,7 @@ function snapshotToStats(snapshot) {
   const monthlyExpenses = ba?.total_expenses ?? 0;
   const cashFlow = monthlyIncome - monthlyExpenses;
   const totalDebt = da?.total_debt ?? debts.reduce((s, d) => s + d.balance, 0);
-  const totalSavings = savings.reduce((s, g) => s + g.balance, 0);
+  const totalSavings = sa?.current_emergency_fund ?? 0;
 
   return {
     debts,
@@ -286,8 +292,14 @@ function DashboardEmpty({ openChat, onNav }) {
 }
 
 /* ─── Dashboard ──────────────────────────────────────────────────────────── */
-export function Dashboard({ snapshot, loading, openChat, onNav }) {
-  const months = ["Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar", "Apr", "May"];
+function getGreeting() {
+  const h = new Date().getHours();
+  if (h < 12) return "Good morning.";
+  if (h < 17) return "Good afternoon.";
+  return "Good evening.";
+}
+
+export function Dashboard({ snapshot, snapshotStatus, loading, openChat, onNav }) {
   const stats = snapshotToStats(snapshot);
 
   // Show loading state
@@ -302,23 +314,11 @@ export function Dashboard({ snapshot, loading, openChat, onNav }) {
     );
   }
 
-  // No snapshot — show empty state
-  if (!snapshot || !stats) {
-    return (
-      <div className="scroll" data-screen-label="01 Dashboard">
-        <DashboardEmpty openChat={openChat} onNav={onNav}/>
-      </div>
-    );
-  }
-
-  const { debts, savings, budget, cashFlow, totalDebt, totalSavings, riskLevel } = stats;
+  const hasData = !!(snapshot && stats);
+  const { debts = [], savings = [], budget = [], cashFlow = 0, totalDebt = 0, totalSavings = 0, riskLevel = null } = stats ?? {};
 
   const totalSpent = budget.reduce((s, d) => s + d.spent, 0);
   const totalBudget = budget.reduce((s, d) => s + d.budget, 0);
-
-  // Synthetic sparklines (backend doesn't send timeseries)
-  const debtSpark = totalDebt > 0 ? Array.from({ length: 12 }, (_, i) => Math.round(totalDebt * (1 + (11 - i) * 0.003))) : null;
-  const savingsSpark = totalSavings > 0 ? Array.from({ length: 12 }, (_, i) => Math.round(totalSavings * (0.75 + i * 0.023))) : null;
 
   return (
     <div className="scroll" data-screen-label="01 Dashboard">
@@ -335,17 +335,19 @@ export function Dashboard({ snapshot, loading, openChat, onNav }) {
             )}
           </div>
           <h1 className="h1" style={{ fontFamily: "var(--font-num)", fontWeight: 400, fontSize: 30, letterSpacing: "-0.02em" }}>
-            Good morning.
+            {getGreeting()}
           </h1>
           <div className="muted" style={{ fontSize: 13.5, marginTop: 4 }}>
-            {riskLevel === "critical" || riskLevel === "high"
+            {!hasData
+              ? <span>No data yet — upload a statement to begin.</span>
+              : riskLevel === "critical" || riskLevel === "high"
               ? <span>Your advisor has flagged <span style={{ color: "var(--negative)", fontWeight: 500 }}>high-risk items</span> to review.</span>
               : <span>Your finances are <span style={{ color: "var(--positive)", fontWeight: 500 }}>on track</span> — live data loaded.</span>
             }
           </div>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <DataBadge live={true}/>
+          <DataBadge live={hasData}/>
           <button className="btn" onClick={openChat}><I.chat size={13}/> Ask advisor</button>
           <button className="btn primary" onClick={() => onNav?.("documents")}><I.upload size={13}/> Add document</button>
         </div>
@@ -353,24 +355,10 @@ export function Dashboard({ snapshot, loading, openChat, onNav }) {
 
       {/* Hero stats */}
       <div className="grid-4">
-        {totalDebt > 0 && (
-          <StatCard label="Total debt" value={totalDebt}
-            sparkData={debtSpark} sparkColor="var(--negative)"
-            icon={I.debt}/>
-        )}
-        {totalSavings > 0 && (
-          <StatCard label="Total savings" value={totalSavings}
-            sparkData={savingsSpark} sparkColor="var(--positive)"
-            icon={I.savings}/>
-        )}
-        {cashFlow !== 0 && (
-          <StatCard label="Cash flow" value={Math.abs(cashFlow)}
-            icon={I.spark}/>
-        )}
-        {totalBudget > 0 && (
-          <StatCard label="May spending" value={totalSpent}
-            icon={I.budget}/>
-        )}
+        <StatCard label="Total debt" value={totalDebt} icon={I.debt}/>
+        <StatCard label="Total savings" value={totalSavings} icon={I.savings}/>
+        <StatCard label="Cash flow" value={Math.abs(cashFlow)} icon={I.spark}/>
+        <StatCard label="Monthly spending" value={totalSpent} icon={I.budget}/>
       </div>
 
       {/* Budget chart when we have data */}
@@ -405,7 +393,6 @@ export function Dashboard({ snapshot, loading, openChat, onNav }) {
             />
           </div>
 
-          {/* Placeholder for where networth chart would go — no timeseries from backend */}
           <div className="card">
             <div className="card-head">
               <div>
@@ -445,12 +432,44 @@ export function Dashboard({ snapshot, loading, openChat, onNav }) {
           <button className="btn ghost" style={{ fontSize: 12 }}><I.refresh size={12}/> Re-analyze</button>
         </div>
 
-        <LiveInsightCards snapshot={snapshot}/>
+        {hasData
+          ? <LiveInsightCards snapshot={snapshot}/>
+          : (
+            <div className="grid-4">
+              {["debt", "payoff", "savings", "budget"].map((agent) => {
+                const meta = AGENT_META[agent];
+                const isComputing = snapshotStatus === "computing";
+                return (
+                  <div key={agent} className="card" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span className="agent-dot" style={{ background: meta.color, width: 8, height: 8 }}/>
+                      <span style={{ fontSize: 11, color: "var(--ink-3)", letterSpacing: "0.06em", textTransform: "uppercase", fontWeight: 500 }}>
+                        {meta.label}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 15, fontWeight: 500, color: "var(--ink-3)" }}>
+                      {isComputing ? "Analyzing…" : "Awaiting data"}
+                    </div>
+                    <div style={{ fontSize: 12.5, color: "var(--ink-4)", lineHeight: 1.5, display: "flex", alignItems: "center", gap: 6 }}>
+                      {isComputing && (
+                        <span
+                          className="spinner"
+                          style={{ width: 11, height: 11, borderColor: "var(--ink-4)", borderTopColor: "transparent", flexShrink: 0 }}
+                          aria-hidden="true"
+                        />
+                      )}
+                      {isComputing ? "Analyzing your statements…" : "Will populate after you add documents."}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )
+        }
       </div>
 
       {/* Activity + Goals */}
       <div className="split-main" style={{ marginTop: 24 }}>
-        {/* Transactions — backend provides no raw transaction endpoint; show empty state */}
         <div className="card">
           <div className="card-head">
             <div>
@@ -476,7 +495,6 @@ export function Dashboard({ snapshot, loading, openChat, onNav }) {
           </div>
         </div>
 
-        {/* Savings goals */}
         {savings.length > 0 ? (
           <div className="card">
             <div className="card-head">

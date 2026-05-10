@@ -1,19 +1,20 @@
-import { useState, useEffect, useCallback } from 'react';
-import { getSnapshot, uploadFile as apiUploadFile, deleteData } from '../lib/api.js';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { getSnapshot, uploadFile as apiUploadFile, deleteData, getSnapshotStatus } from '../lib/api.js';
 import { getSessionId, clearSessionId } from '../lib/session.js';
 
 /**
  * useFinancialData — manages snapshot + upload state.
  *
  * Returns:
- *   snapshot     — Snapshot | null
- *   loading      — boolean
- *   error        — Error | null
- *   uploadFile   — (file: File) => Promise<{ rows, columns, table_name, snapshot }>
- *   uploading    — boolean
- *   uploadError  — Error | null
- *   refresh      — () => Promise<void>  re-fetches snapshot from backend
- *   clearAll     — () => Promise<void>  DELETE /api/data/:session_id + clears local state
+ *   snapshot        — Snapshot | null
+ *   loading         — boolean
+ *   error           — Error | null
+ *   uploadFile      — (file: File) => Promise<{ rows, columns, table_name, snapshot }>
+ *   uploading       — boolean
+ *   uploadError     — Error | null
+ *   snapshotStatus  — "ready"|"computing"|"stale"|"none"|null
+ *   refresh         — () => Promise<void>  re-fetches snapshot from backend
+ *   clearAll        — () => Promise<void>  DELETE /api/data/:session_id + clears local state
  */
 export function useFinancialData() {
   const [snapshot, setSnapshot] = useState(null);
@@ -21,6 +22,10 @@ export function useFinancialData() {
   const [error, setError] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState(null);
+  const [snapshotStatus, setSnapshotStatus] = useState(null);
+
+  const pollTimerRef = useRef(null);
+  const pollActiveRef = useRef(false);
 
   const fetchSnapshot = useCallback(async (signal) => {
     const sessionId = getSessionId();
@@ -29,7 +34,7 @@ export function useFinancialData() {
     try {
       const data = await getSnapshot(sessionId, signal);
       if (signal?.aborted) return;
-      setSnapshot(data); // null on 404 — that's expected
+      setSnapshot(data);
     } catch (err) {
       if (err.name === 'AbortError') return;
       setError(err);
@@ -38,7 +43,6 @@ export function useFinancialData() {
     }
   }, []);
 
-  // Fetch on mount
   useEffect(() => {
     const controller = new AbortController();
     fetchSnapshot(controller.signal);
@@ -50,19 +54,60 @@ export function useFinancialData() {
     return fetchSnapshot(controller.signal);
   }, [fetchSnapshot]);
 
+  const stopPolling = useCallback(() => {
+    pollActiveRef.current = false;
+    if (pollTimerRef.current) {
+      clearTimeout(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+  }, []);
+
+  const startPolling = useCallback(() => {
+    if (pollActiveRef.current) return;
+    pollActiveRef.current = true;
+    setSnapshotStatus('computing');
+
+    const poll = async () => {
+      if (!pollActiveRef.current) return;
+      const sessionId = getSessionId();
+      try {
+        const result = await getSnapshotStatus(sessionId);
+        if (!pollActiveRef.current) return;
+        setSnapshotStatus(result.status);
+        if (result.status === 'ready') {
+          stopPolling();
+          refresh().catch(() => {});
+        } else if (result.status === 'computing') {
+          pollTimerRef.current = setTimeout(poll, 3000);
+        } else {
+          stopPolling();
+        }
+      } catch {
+        if (pollActiveRef.current) {
+          pollTimerRef.current = setTimeout(poll, 3000);
+        }
+      }
+    };
+
+    poll();
+  }, [refresh, stopPolling]);
+
+  useEffect(() => {
+    return () => stopPolling();
+  }, [stopPolling]);
+
   const uploadFile = useCallback(async (file) => {
     const sessionId = getSessionId();
     setUploading(true);
     setUploadError(null);
     try {
       const result = await apiUploadFile(file, sessionId);
-      // Backend returns a snapshot inline with the upload response
       if (result.snapshot) {
         setSnapshot(result.snapshot);
       } else {
-        // Fall back to fetching the snapshot separately
         await fetchSnapshot();
       }
+      startPolling();
       return result;
     } catch (err) {
       setUploadError(err);
@@ -70,10 +115,11 @@ export function useFinancialData() {
     } finally {
       setUploading(false);
     }
-  }, [fetchSnapshot]);
+  }, [fetchSnapshot, startPolling]);
 
   const clearAll = useCallback(async () => {
     const sessionId = getSessionId();
+    stopPolling();
     try {
       await deleteData(sessionId);
     } catch {
@@ -82,7 +128,8 @@ export function useFinancialData() {
     clearSessionId();
     setSnapshot(null);
     setError(null);
-  }, []);
+    setSnapshotStatus(null);
+  }, [stopPolling]);
 
-  return { snapshot, loading, error, uploadFile, uploading, uploadError, refresh, clearAll };
+  return { snapshot, loading, error, uploadFile, uploading, uploadError, snapshotStatus, startPolling, refresh, clearAll };
 }

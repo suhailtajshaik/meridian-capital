@@ -78,6 +78,9 @@ export default function App() {
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
+  const ADVISOR_SCOPE_MAP = { debt: "debt", savings: "savings", budget: "budget", payoff: "payoff" };
+  const advisorScope = ADVISOR_SCOPE_MAP[view] ?? null;
+
   const titleFor = {
     dashboard: { crumb: "Overview", title: "Dashboard" },
     documents: { crumb: "Ingestion", title: "Documents" },
@@ -97,6 +100,8 @@ export default function App() {
       uploadFile: financialData.uploadFile,
       uploading: financialData.uploading,
       uploadError: financialData.uploadError,
+      snapshotStatus: financialData.snapshotStatus,
+      startPolling: financialData.startPolling,
       refresh: financialData.refresh,
       openChat: () => setTweak("chatOpen", true),
       onNav: setView,
@@ -142,6 +147,24 @@ export default function App() {
             <I.panel size={14}/>
           </button>
         </header>
+        {financialData.snapshotStatus === "computing" && (
+          <div style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            padding: "0 20px",
+            height: 32,
+            background: "var(--surface-2)",
+            borderLeft: "3px solid var(--info)",
+            borderBottom: "1px solid var(--line)",
+            fontSize: 12.5,
+            color: "var(--ink-2)",
+            flexShrink: 0,
+          }}>
+            <span className="spinner" style={{ width: 11, height: 11, borderColor: "var(--info)", borderTopColor: "transparent", flexShrink: 0 }}/>
+            Advisors are analyzing your data… this typically takes 30–60 seconds.
+          </div>
+        )}
         {renderView()}
       </main>
 
@@ -151,6 +174,7 @@ export default function App() {
         prominentAgents={t.agentVisibility === "prominent"}
         online={online}
         model={model}
+        advisorScope={advisorScope}
       />
 
       <Tweaks t={t} setTweak={setTweak}/>

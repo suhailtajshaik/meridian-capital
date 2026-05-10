@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 # ---------------------------------------------------------------------------
@@ -107,6 +107,21 @@ class SavingsVehicle(BaseModel):
     type: str = Field(..., description="Account or investment type (e.g. 'High-Yield Savings Account', 'Roth IRA')")
     reason: str = Field(..., description="Why this vehicle is appropriate for this user's situation")
     expected_yield: Optional[float] = Field(None, description="Expected annual yield as a percentage (e.g. 4.5 for 4.5%)")
+
+    @field_validator("expected_yield", mode="before")
+    @classmethod
+    def _coerce_yield(cls, v):
+        if v is None or isinstance(v, (int, float)):
+            return v
+        if isinstance(v, str):
+            cleaned = v.strip().rstrip("%").strip()
+            if not cleaned:
+                return None
+            try:
+                return float(cleaned)
+            except ValueError:
+                return None
+        return v
 
 
 class Milestone(BaseModel):

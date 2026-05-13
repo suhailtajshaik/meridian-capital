@@ -126,7 +126,10 @@ export default function App() {
     setShowWelcome(false);
   };
 
+  const clearChatRef = React.useRef(null);
+
   const handleClearAll = async () => {
+    clearChatRef.current?.();
     await financialData.clearAll();
     localStorage.removeItem("meridian.user_name");
     setUserName("");
@@ -259,6 +262,7 @@ export default function App() {
         online={online}
         model={model}
         advisorScope={advisorScope}
+        clearRef={clearChatRef}
       />
 
       <Tweaks t={t} setTweak={setTweak}/>

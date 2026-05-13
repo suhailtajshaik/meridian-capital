@@ -687,11 +687,13 @@ function StreamError({ error, onDismiss }) {
 }
 
 /* ─── ChatPanel ──────────────────────────────────────────────────────────── */
-export function ChatPanel({ open, onClose, prominentAgents, online, model, advisorScope }) {
+export function ChatPanel({ open, onClose, prominentAgents, online, model, advisorScope, clearRef }) {
   const advisorScopeRef = React.useRef(advisorScope);
   React.useEffect(() => { advisorScopeRef.current = advisorScope; }, [advisorScope]);
 
   const { messages, sendMessage, isStreaming, activeAgent, error, clear } = useAgentStream(advisorScopeRef);
+
+  React.useEffect(() => { if (clearRef) clearRef.current = clear; }, [clear, clearRef]);
 
   const [draft, setDraft] = React.useState("");
   const [streamError, setStreamError] = React.useState(null);

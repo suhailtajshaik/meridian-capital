@@ -2,9 +2,9 @@
 
 /* Routing demo — supervisor decides which agents handle a query */
 export const AGENT_META = {
-  supervisor: { label: "Supervisor", color: "var(--agent-supervisor)" },
-  debt: { label: "Debt Analyzer", color: "var(--agent-debt)" },
-  savings: { label: "Savings Strategy", color: "var(--agent-savings)" },
-  budget: { label: "Budget Advisor", color: "var(--agent-budget)" },
-  payoff: { label: "Payoff Optimizer", color: "var(--agent-payoff)" },
+  supervisor: { label: "Advisor", color: "var(--agent-supervisor)" },
+  debt: { label: "Debt Coach", color: "var(--agent-debt)" },
+  savings: { label: "Savings Guide", color: "var(--agent-savings)" },
+  budget: { label: "Budget Helper", color: "var(--agent-budget)" },
+  payoff: { label: "Payoff Planner", color: "var(--agent-payoff)" },
 };
